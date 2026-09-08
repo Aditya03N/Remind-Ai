@@ -3,12 +3,15 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fetchWithAuth } from "../../utils/api";
+import toast from "react-hot-toast";
 
 export default function Dashboard() {
   const [data, setData] = useState(null);
+  const [allProgress, setAllProgress] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeCategory, setActiveCategory] = useState("ALL");
+  const [dismissedReminders, setDismissedReminders] = useState([]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -17,18 +20,41 @@ export default function Dashboard() {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      const res = await fetchWithAuth("/progress/dashboard");
-      if (res.ok) {
-        const json = await res.json();
+      const [dashRes, allRes] = await Promise.all([
+        fetchWithAuth("/progress/dashboard"),
+        fetchWithAuth("/progress/all")
+      ]);
+
+      if (dashRes.ok) {
+        const json = await dashRes.json();
         setData(json);
       } else {
         setError("Failed to load dashboard metrics.");
+      }
+
+      if (allRes.ok) {
+        const allJson = await allRes.json();
+        setAllProgress(allJson);
       }
     } catch (err) {
       console.error("Dashboard fetch error:", err);
       setError("Network error while connecting to server.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDismissReminder = async (progressId) => {
+    try {
+      setDismissedReminders(prev => [...prev, progressId]);
+      await fetchWithAuth(`/progress/${progressId}/reminder`, {
+        method: "PUT",
+        body: JSON.stringify({ manualReminderDate: null })
+      });
+      toast.success("Reminder dismissed");
+      fetchDashboardData();
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -101,9 +127,72 @@ export default function Dashboard() {
   const overallHealth = data?.overallHealth || 0;
   const totalConcepts = data?.totalConcepts || allTopics.length;
   const todayPriority = data?.todayPriority;
+  const nextQueuedTopics = data?.revisionPlan?.slice(1, 4) || [];
+
+  // Check for due manual reminders (scheduled date reached)
+  const now = new Date();
+  const dueReminders = allProgress.filter(p => {
+    if (!p.manualReminderDate) return false;
+    if (dismissedReminders.includes(p._id)) return false;
+    return new Date(p.manualReminderDate) <= now;
+  });
 
   return (
     <div className="flex flex-col gap-10">
+      {/* Due Manual Reminders Banner */}
+      {dueReminders.length > 0 && (
+        <div className="space-y-3">
+          {dueReminders.map((rem) => {
+            const conceptId = rem.conceptId?._id || rem.conceptId;
+            const conceptName = rem.conceptId?.name || "Topic";
+            const subjectName = rem.conceptId?.subjectId?.name || "Subject";
+
+            return (
+              <div 
+                key={rem._id}
+                className="p-4 md:p-5 bg-secondary-fixed/40 border-2 border-secondary rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-md animate-in fade-in slide-in-from-top-2 duration-300"
+              >
+                <div className="flex items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-xl bg-secondary-fixed text-on-secondary-fixed flex items-center justify-center shrink-0 shadow-xs animate-bounce">
+                    <span className="material-symbols-outlined text-xl">alarm</span>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold px-2 py-0.5 bg-secondary text-on-secondary rounded-full uppercase tracking-wide">
+                        Scheduled Reminder
+                      </span>
+                      <span className="text-xs text-on-surface-variant font-medium">{subjectName}</span>
+                    </div>
+                    <h4 className="text-base font-bold text-on-surface mt-0.5">
+                      Revision Due: {conceptName}
+                    </h4>
+                    <p className="text-xs text-on-surface-variant">
+                      Your scheduled revision time for this topic has arrived. Complete a quick active recall check now!
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                  <button
+                    onClick={() => handleDismissReminder(rem._id)}
+                    className="px-3 py-1.5 text-xs text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-lg font-medium transition-colors"
+                  >
+                    Dismiss
+                  </button>
+                  <Link
+                    href={`/retention-check/${conceptId}`}
+                    className="px-4 py-2 bg-primary hover:bg-primary-container text-on-primary text-xs font-bold rounded-xl shadow-sm transition-all flex items-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-sm">play_arrow</span>
+                    <span>Revise Now</span>
+                  </Link>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Top Section: Overall Knowledge Health & Quick Stats */}
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Overall Knowledge Health Card */}
@@ -313,7 +402,7 @@ export default function Dashboard() {
                 >
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold border flex items-center gap-1 capitalize" style={{}} className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border flex items-center gap-1 ${statusColor}`}>
+                      <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border flex items-center gap-1 ${statusColor}`}>
                         {topic.knowledgeStatus === "MASTERED" && <span className="material-symbols-outlined text-xs">verified</span>}
                         {topic.knowledgeStatus === "CRITICAL" && <span className="w-1.5 h-1.5 rounded-full bg-error animate-pulse"></span>}
                         {topic.knowledgeStatus?.replace("_", " ")}
@@ -363,69 +452,144 @@ export default function Dashboard() {
         )}
       </section>
 
-      {/* Immediate Focus Hero Card */}
-      <section>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold text-on-surface" style={{fontFamily: "var(--font-headline-sm)"}}>Immediate Focus</h3>
+      {/* Immediate Focus & Up Next Hero Section */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-bold text-on-surface" style={{fontFamily: "var(--font-headline-sm)"}}>Immediate Focus &amp; Up Next</h3>
           <span className="text-xs text-on-surface-variant">AI Spaced Repetition Engine</span>
         </div>
 
-        {todayPriority ? (
-          <div className="bg-surface-container-lowest rounded-2xl p-6 md:p-8 shadow-[0_8px_30px_rgba(124,58,237,0.08)] border border-primary-container/20 relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
-            <div className="absolute -right-20 -top-20 w-64 h-64 bg-primary-container/10 rounded-full blur-3xl pointer-events-none"></div>
-            <div className="flex flex-col gap-2 max-w-2xl relative z-10">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="px-3 py-1 bg-error-container text-on-error-container rounded-full text-xs font-semibold flex items-center gap-1.5 shadow-xs">
-                  <span className="w-2 h-2 rounded-full bg-error animate-pulse"></span> 
-                  {todayPriority.status?.replace("_", " ") || "Critical Attention"}
-                </span>
-                <span className="text-xs text-on-surface-variant flex items-center gap-1">
-                  <span className="material-symbols-outlined text-sm">schedule</span> 
-                  Est. time: {todayPriority.recommendedDuration?.minMinutes || 10}-{todayPriority.recommendedDuration?.maxMinutes || 15} mins
-                </span>
-                <span className="text-xs text-on-surface-variant px-2 py-0.5 bg-surface-container rounded-md">
-                  {todayPriority.concept?.subjectId?.name || "Topic"}
-                </span>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Main Immediate Focus Card */}
+          <div className="lg:col-span-2">
+            {todayPriority ? (
+              <div className="bg-surface-container-lowest rounded-2xl p-6 md:p-8 shadow-[0_8px_30px_rgba(124,58,237,0.08)] border border-primary-container/20 relative overflow-hidden flex flex-col justify-between gap-6 h-full">
+                <div className="absolute -right-20 -top-20 w-64 h-64 bg-primary-container/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div className="flex flex-col gap-2 relative z-10">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-3 py-1 bg-error-container text-on-error-container rounded-full text-xs font-semibold flex items-center gap-1.5 shadow-xs">
+                      <span className="w-2 h-2 rounded-full bg-error animate-pulse"></span> 
+                      #1 Priority: {todayPriority.status?.replace("_", " ") || "Critical Attention"}
+                    </span>
+                    <span className="text-xs text-on-surface-variant flex items-center gap-1">
+                      <span className="material-symbols-outlined text-sm">schedule</span> 
+                      Est. time: {todayPriority.recommendedDuration?.minMinutes || 10}-{todayPriority.recommendedDuration?.maxMinutes || 15} mins
+                    </span>
+                    <span className="text-xs text-on-surface-variant px-2 py-0.5 bg-surface-container rounded-md">
+                      {todayPriority.concept?.subjectId?.name || "Topic"}
+                    </span>
+                  </div>
+                  <h4 className="text-2xl md:text-3xl font-bold text-on-surface mt-2" style={{fontFamily: "var(--font-headline-lg)"}}>
+                    {todayPriority.concept?.name || "Priority Concept"}
+                  </h4>
+                  <p className="text-sm text-on-surface-variant leading-relaxed">
+                    Memory retention is at <span className="font-bold text-error">{todayPriority.estimatedRetention}%</span>. Performing active recall now prevents retrieval failure.
+                  </p>
+                </div>
+
+                <div className="relative z-10 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-2">
+                  <Link 
+                    href={`/retention-check/${todayPriority.concept?._id || ""}`}
+                    className="px-6 py-3 bg-primary hover:bg-primary-container text-on-primary text-xs font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2"
+                  >
+                    <span className="material-symbols-outlined text-sm">play_arrow</span>
+                    <span>Start Active Recall Quiz</span>
+                  </Link>
+                  <Link
+                    href={`/concept/${todayPriority.concept?._id || ""}`}
+                    className="px-4 py-3 bg-surface-container-low hover:bg-surface-variant text-on-surface text-xs font-semibold rounded-xl text-center transition-colors"
+                  >
+                    View Decay Analysis
+                  </Link>
+                </div>
               </div>
-              <h4 className="text-3xl font-bold text-on-surface mt-1" style={{fontFamily: "var(--font-headline-lg)"}}>
-                {todayPriority.concept?.name || "Priority Concept"}
-              </h4>
-              <p className="text-sm text-on-surface-variant">
-                Memory trace decay is currently at <span className="font-bold text-error">{todayPriority.estimatedRetention}% retention</span>. Immediate active recall is recommended to prevent complete retrieval failure.
-              </p>
-            </div>
-            <div className="relative z-10 w-full md:w-auto flex flex-col sm:flex-row gap-2">
-              <Link 
-                href={`/concept/${todayPriority.concept?._id || ""}`}
-                className="px-6 py-3.5 bg-primary hover:bg-primary-container text-on-primary text-sm font-semibold rounded-xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 group"
-              >
-                <span>Start Active Recall</span>
-                <span className="material-symbols-outlined group-hover:translate-x-1 transition-transform">arrow_forward</span>
-              </Link>
-            </div>
+            ) : (
+              <div className="bg-surface-container-lowest rounded-2xl p-8 border border-outline-variant/40 flex items-center justify-between gap-4 h-full">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-emerald-500/10 text-emerald-700 flex items-center justify-center">
+                    <span className="material-symbols-outlined text-2xl">verified</span>
+                  </div>
+                  <div>
+                    <h4 className="text-lg font-bold text-on-surface">Knowledge Shield Active</h4>
+                    <p className="text-xs text-on-surface-variant mt-0.5">No immediate decay alerts! All concepts are in safe retention zones.</p>
+                  </div>
+                </div>
+                <Link 
+                  href="/subjects"
+                  className="px-4 py-2 bg-surface-container-low hover:bg-primary hover:text-on-primary text-on-surface rounded-xl text-xs font-semibold transition-all whitespace-nowrap"
+                >
+                  Explore Concepts
+                </Link>
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="bg-surface-container-lowest rounded-2xl p-6 md:p-8 border border-outline-variant/40 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-emerald-500/10 text-emerald-700 flex items-center justify-center">
-                <span className="material-symbols-outlined text-2xl">verified</span>
+
+          {/* Up Next in Queue Card */}
+          <div className="bg-surface-container-lowest rounded-2xl p-6 border border-outline-variant/40 shadow-xs flex flex-col justify-between gap-4">
+            <div>
+              <div className="flex items-center justify-between mb-3 border-b border-outline-variant/30 pb-2">
+                <h4 className="text-sm font-bold text-on-surface flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-primary text-base">queue</span>
+                  <span>Up Next to Revise</span>
+                </h4>
+                <Link href="/revision" className="text-xs text-primary font-semibold hover:underline">
+                  View All ({data?.revisionPlan?.length || 0})
+                </Link>
               </div>
-              <div>
-                <h4 className="text-lg font-bold text-on-surface">Knowledge Shield Active</h4>
-                <p className="text-xs text-on-surface-variant mt-0.5">No immediate decay alerts! You are keeping all concepts in healthy retention zones.</p>
-              </div>
+
+              {nextQueuedTopics.length > 0 ? (
+                <div className="space-y-3">
+                  {nextQueuedTopics.map((item, idx) => {
+                    const conceptId = item.concept?._id || "";
+                    const isCrit = item.status === "CRITICAL" || item.status === "HIGH_RISK";
+
+                    return (
+                      <div 
+                        key={item.progressId || idx}
+                        className="p-3 bg-surface-container-low rounded-xl border border-outline-variant/30 flex items-center justify-between gap-3 hover:border-primary/40 transition-all"
+                      >
+                        <div className="overflow-hidden">
+                          <p className="text-xs font-bold text-on-surface truncate">{item.concept?.name || "Concept"}</p>
+                          <div className="flex items-center gap-1.5 text-[11px] text-on-surface-variant mt-0.5">
+                            <span className={isCrit ? "text-error font-semibold" : "text-amber-700"}>
+                              {item.estimatedRetention}% ret
+                            </span>
+                            <span>•</span>
+                            <span>{item.concept?.subjectId?.name || "Subject"}</span>
+                          </div>
+                        </div>
+
+                        <Link
+                          href={`/retention-check/${conceptId}`}
+                          className="px-2.5 py-1.5 bg-primary/10 hover:bg-primary text-primary hover:text-on-primary rounded-lg text-xs font-bold transition-all shrink-0 flex items-center gap-1"
+                        >
+                          <span className="material-symbols-outlined text-xs">play_arrow</span>
+                          <span>Quiz</span>
+                        </Link>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-xs text-on-surface-variant space-y-1">
+                  <span className="material-symbols-outlined text-2xl text-on-surface-variant/40">done_all</span>
+                  <p className="font-semibold">Queue is clear!</p>
+                  <p className="text-[11px]">No other urgent concepts scheduled.</p>
+                </div>
+              )}
             </div>
-            <Link 
-              href="/subjects"
-              className="px-5 py-2.5 bg-surface-container-low hover:bg-primary hover:text-on-primary text-on-surface rounded-xl text-xs font-semibold transition-all whitespace-nowrap"
+
+            <Link
+              href="/revision"
+              className="w-full py-2 bg-surface-container hover:bg-surface-variant text-on-surface rounded-xl text-xs font-semibold text-center transition-colors block"
             >
-              Explore Concepts
+              Open Revision Planner
             </Link>
           </div>
-        )}
+        </div>
       </section>
 
-      {/* Bottom Section: Today's Revision Plan List */}
+      {/* Bottom Section: Revision Plan Overview */}
       <section className="flex flex-col gap-4 pb-16">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-on-surface" style={{fontFamily: "var(--font-headline-sm)"}}>Today's Revision Plan</h3>
@@ -463,10 +627,10 @@ export default function Dashboard() {
                     {item.status === "CRITICAL" ? "🔴 Critical" : item.status === "HIGH_RISK" ? "⚠️ High Risk" : "⏳ Moderate"}
                   </span>
                   <Link 
-                    href={`/concept/${item.concept?._id || ""}`}
+                    href={`/retention-check/${item.concept?._id || ""}`}
                     className="px-4 py-2 bg-surface-container-low hover:bg-primary hover:text-on-primary text-on-surface rounded-lg text-xs font-semibold transition-all"
                   >
-                    Review
+                    Revise
                   </Link>
                 </div>
               </div>

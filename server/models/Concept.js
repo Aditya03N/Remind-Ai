@@ -18,6 +18,18 @@ const conceptSchema = new mongoose.Schema({
   description: {
     type: String,
   },
+  studyMaterial: {
+    type: String,
+    default: "",
+  },
+  notesFileName: {
+    type: String,
+    default: "",
+  },
+  aiSummary: {
+    type: String,
+    default: "",
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",

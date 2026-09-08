@@ -1,6 +1,7 @@
 const StudentProgress = require("../models/StudentProgress");
 const Concept = require("../models/Concept");
 const Attempt = require("../models/Attempt");
+const mongoose = require("mongoose");
 
 const { 
   calculateEstimatedRetention, 
@@ -24,7 +25,6 @@ const initializeProgress = async (req, res) => {
     const concept = await Concept.findById(conceptId);
     if (!concept) return res.status(404).json({ message: "Concept not found" });
 
-    // Ensure it doesn't already exist
     let progress = await StudentProgress.findOne({ userId: req.user._id, conceptId });
     if (progress) return res.status(400).json({ message: "Progress already initialized" });
 
@@ -38,7 +38,7 @@ const initializeProgress = async (req, res) => {
       estimatedRetention: initialScore,
       knowledgeStatus: status,
       difficulty: concept.difficulty,
-      nextReviewDate: new Date(new Date().setDate(new Date().getDate() + (status === "STRONG" ? 3 : 1))), // Next review based on initial
+      nextReviewDate: new Date(new Date().setDate(new Date().getDate() + (status === "STRONG" ? 3 : 1))),
       assessmentHistory: [{
         score: initialScore,
         assessmentType: "INITIAL"
@@ -52,6 +52,7 @@ const initializeProgress = async (req, res) => {
 };
 
 // @desc    Get dashboard metrics and today's priority
+// @route   GET /api/progress/dashboard
 const getDashboard = async (req, res) => {
   try {
     const progresses = await StudentProgress.find({ userId: req.user._id }).populate({
@@ -81,7 +82,6 @@ const getDashboard = async (req, res) => {
       });
     }
 
-    // Update retention for all before calculating dashboard metrics
     let totalRetention = 0;
     const knowledgeOverview = { STRONG: 0, MODERATE_RISK: 0, HIGH_RISK: 0, CRITICAL: 0, MASTERED: 0 };
     const categorizedTopics = {
@@ -109,72 +109,82 @@ const getDashboard = async (req, res) => {
       }
 
       totalRetention += prog.estimatedRetention;
-      const status = prog.knowledgeStatus || "STRONG";
-      knowledgeOverview[status] = (knowledgeOverview[status] || 0) + 1;
 
-      const topicItem = {
+      if (knowledgeOverview[prog.knowledgeStatus] !== undefined) {
+        knowledgeOverview[prog.knowledgeStatus]++;
+      }
+
+      const topicInfo = {
         progressId: prog._id,
         conceptId: prog.conceptId._id,
         name: prog.conceptId.name,
-        subjectName: prog.conceptId.subjectId?.name || "General",
-        difficulty: prog.difficulty || prog.conceptId.difficulty || "Medium",
-        estimatedRetention: prog.estimatedRetention,
-        currentScore: prog.currentScore,
-        knowledgeStatus: status,
+        subjectName: prog.conceptId.subjectId?.name || "Subject",
+        difficulty: prog.difficulty,
+        estimatedRetention: Math.round(prog.estimatedRetention),
+        knowledgeStatus: prog.knowledgeStatus,
         revisionCount: prog.revisionCount,
         lastAssessmentDate: prog.lastAssessmentDate,
-        nextReviewDate: prog.nextReviewDate
+        manualReminderDate: prog.manualReminderDate || null
       };
 
-      if (categorizedTopics[status]) {
-        categorizedTopics[status].push(topicItem);
+      if (categorizedTopics[prog.knowledgeStatus]) {
+        categorizedTopics[prog.knowledgeStatus].push(topicInfo);
       }
 
-      // Calculate priority for revision plan
-      if (status !== "MASTERED") {
-        const daysSinceAssessment = getDaysSince(prog.lastAssessmentDate);
-        const priority = calculatePriority(prog.estimatedRetention, prog.difficulty, daysSinceAssessment, prog.currentScore);
+      if (prog.knowledgeStatus !== "MASTERED") {
+        const priorityScore = calculatePriority(prog.estimatedRetention, prog.difficulty, prog.knowledgeStatus);
+        const duration = estimateRevisionDuration(prog.difficulty, prog.knowledgeStatus);
         
         revisionPlan.push({
           progressId: prog._id,
           concept: prog.conceptId,
-          status: status,
-          estimatedRetention: prog.estimatedRetention,
-          priorityScore: priority,
-          recommendedDuration: estimateRevisionDuration(status, prog.difficulty)
+          estimatedRetention: Math.round(prog.estimatedRetention),
+          status: prog.knowledgeStatus,
+          priorityScore,
+          recommendedDuration: duration,
+          manualReminderDate: prog.manualReminderDate || null
         });
       }
     }
 
-    const activeCount = progresses.filter(p => p.conceptId).length;
-    const overallHealth = activeCount > 0 ? Math.round(totalRetention / activeCount) : 0;
-    
-    // Sort revision plan by priority desc
     revisionPlan.sort((a, b) => b.priorityScore - a.priorityScore);
 
+    const overallHealth = progresses.length > 0 ? Math.round(totalRetention / progresses.length) : 0;
     const todayPriority = revisionPlan.length > 0 ? revisionPlan[0] : null;
 
     res.json({
       overallHealth,
-      totalConcepts: activeCount,
+      totalConcepts: progresses.length,
       todayPriority,
       knowledgeOverview,
       categorizedTopics,
-      revisionPlan: revisionPlan.slice(0, 5) // Top 5
+      revisionPlan
     });
   } catch (error) {
+    console.error("Dashboard error:", error);
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc    Get full revision recommendations
-// @route   GET /api/progress/recommendations
-const getRecommendations = async (req, res) => {
+// @desc    Get all learned concepts progress list
+// @route   GET /api/progress/all
+const getAllProgress = async (req, res) => {
   try {
-    const progresses = await StudentProgress.find({ userId: req.user._id }).populate("conceptId");
-    const revisionPlan = [];
+    const progresses = await StudentProgress.find({ userId: req.user._id })
+      .populate({
+        path: "conceptId",
+        populate: {
+          path: "subjectId",
+          select: "name"
+        }
+      })
+      .sort({ updatedAt: -1 });
+
+    const updatedProgresses = [];
 
     for (let prog of progresses) {
+      if (!prog.conceptId) continue;
+
       if (prog.knowledgeStatus !== "MASTERED") {
         const daysPassed = getDaysSince(prog.lastAssessmentDate);
         prog.estimatedRetention = calculateEstimatedRetention(
@@ -185,16 +195,124 @@ const getRecommendations = async (req, res) => {
         );
         prog.knowledgeStatus = determineKnowledgeStatus(prog.estimatedRetention);
         await prog.save();
-        
-        const priority = calculatePriority(prog.estimatedRetention, prog.difficulty, daysPassed, prog.currentScore);
-        
+      }
+
+      updatedProgresses.push(prog);
+    }
+
+    res.json(updatedProgresses);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Set or clear manual reminder date
+// @route   PUT /api/progress/:progressId/reminder
+const setManualReminder = async (req, res) => {
+  const { progressId } = req.params;
+  const { manualReminderDate } = req.body;
+
+  try {
+    if (!mongoose.Types.ObjectId.isValid(progressId)) {
+      return res.status(400).json({ message: "Invalid Progress ID" });
+    }
+
+    const progress = await StudentProgress.findOne({ _id: progressId, userId: req.user._id });
+    if (!progress) return res.status(404).json({ message: "Progress record not found" });
+
+    progress.manualReminderDate = manualReminderDate ? new Date(manualReminderDate) : null;
+    await progress.save();
+
+    res.json({
+      message: manualReminderDate ? "Manual reminder scheduled successfully!" : "Reminder cleared.",
+      progress
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Set manual reminder directly by concept ID
+// @route   PUT /api/progress/concept/:conceptId/reminder
+const setConceptManualReminder = async (req, res) => {
+  const { conceptId } = req.params;
+  const { manualReminderDate } = req.body;
+
+  try {
+    if (!mongoose.Types.ObjectId.isValid(conceptId)) {
+      return res.status(400).json({ message: "Invalid Concept ID" });
+    }
+
+    let progress = await StudentProgress.findOne({ conceptId, userId: req.user._id });
+    if (!progress) {
+      const concept = await Concept.findById(conceptId);
+      if (!concept) return res.status(404).json({ message: "Concept not found" });
+
+      progress = await StudentProgress.create({
+        userId: req.user._id,
+        conceptId,
+        initialScore: 70,
+        currentScore: 70,
+        estimatedRetention: 70,
+        knowledgeStatus: "MODERATE_RISK",
+        difficulty: concept.difficulty || "Medium",
+        manualReminderDate: manualReminderDate ? new Date(manualReminderDate) : null
+      });
+    } else {
+      progress.manualReminderDate = manualReminderDate ? new Date(manualReminderDate) : null;
+      await progress.save();
+    }
+
+    res.json({
+      message: manualReminderDate ? "Revision schedule updated!" : "Revision schedule removed.",
+      progress
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get recommendations list
+// @route   GET /api/progress/recommendations
+const getRecommendations = async (req, res) => {
+  try {
+    const progresses = await StudentProgress.find({ userId: req.user._id }).populate({
+      path: "conceptId",
+      populate: {
+        path: "subjectId",
+        select: "name"
+      }
+    });
+
+    const revisionPlan = [];
+
+    for (let prog of progresses) {
+      if (!prog.conceptId) continue;
+
+      if (prog.knowledgeStatus !== "MASTERED") {
+        const daysPassed = getDaysSince(prog.lastAssessmentDate);
+        prog.estimatedRetention = calculateEstimatedRetention(
+          prog.currentScore, 
+          prog.difficulty, 
+          daysPassed, 
+          prog.revisionCount
+        );
+        prog.knowledgeStatus = determineKnowledgeStatus(prog.estimatedRetention);
+        await prog.save();
+      }
+
+      if (prog.knowledgeStatus !== "MASTERED") {
+        const priorityScore = calculatePriority(prog.estimatedRetention, prog.difficulty, prog.knowledgeStatus);
+        const duration = estimateRevisionDuration(prog.difficulty, prog.knowledgeStatus);
+
         revisionPlan.push({
           progressId: prog._id,
           concept: prog.conceptId,
+          estimatedRetention: Math.round(prog.estimatedRetention),
           status: prog.knowledgeStatus,
-          estimatedRetention: prog.estimatedRetention,
-          priorityScore: priority,
-          recommendedDuration: estimateRevisionDuration(prog.knowledgeStatus, prog.difficulty)
+          priorityScore,
+          recommendedDuration: `${duration.minMinutes}–${duration.maxMinutes} mins`,
+          manualReminderDate: prog.manualReminderDate || null
         });
       }
     }
@@ -207,14 +325,12 @@ const getRecommendations = async (req, res) => {
 };
 
 // @desc    Submit retention check result
-// @route   POST /api/progress/retention-check
 const submitRetentionCheck = async (req, res) => {
   const { conceptId, score, timeTaken } = req.body;
   try {
     let progress = await StudentProgress.findOne({ userId: req.user._id, conceptId });
     if (!progress) return res.status(404).json({ message: "Progress not found" });
 
-    // Process logic
     const result = processRetentionCheck(progress, score);
     progress = result.progress;
     
@@ -240,7 +356,6 @@ const submitRetentionCheck = async (req, res) => {
 };
 
 // @desc    Mark a concept as revised
-// @route   POST /api/progress/revision-complete
 const markRevisionComplete = async (req, res) => {
   const { conceptId } = req.body;
   try {
@@ -258,7 +373,6 @@ const markRevisionComplete = async (req, res) => {
 };
 
 // @desc    Submit post-revision assessment
-// @route   POST /api/progress/post-revision-assessment
 const submitPostRevision = async (req, res) => {
   const { conceptId, score, timeTaken } = req.body;
   try {
@@ -270,15 +384,12 @@ const submitPostRevision = async (req, res) => {
     progress.estimatedRetention = score;
     progress.knowledgeStatus = determineKnowledgeStatus(score);
 
-    // Note: Post-revision success does NOT increase successfulRetentionChecks directly
-    
     if (score >= 80) {
-      // Schedule next check
       const nextReview = new Date();
       nextReview.setDate(nextReview.getDate() + 3);
       progress.nextReviewDate = nextReview;
     } else {
-      progress.nextReviewDate = new Date(); // Immediately due
+      progress.nextReviewDate = new Date();
     }
 
     progress.assessmentHistory.push({
@@ -295,13 +406,11 @@ const submitPostRevision = async (req, res) => {
 };
 
 // @desc    Get details for a specific concept
-// @route   GET /api/progress/:conceptId
 const getConceptProgress = async (req, res) => {
   try {
     let progress = await StudentProgress.findOne({ userId: req.user._id, conceptId: req.params.conceptId }).populate("conceptId");
     if (!progress) return res.status(404).json({ message: "Progress not found" });
 
-    // Update retention before serving
     if (progress.knowledgeStatus !== "MASTERED") {
       const daysPassed = getDaysSince(progress.lastAssessmentDate);
       progress.estimatedRetention = calculateEstimatedRetention(
@@ -326,6 +435,9 @@ const getConceptProgress = async (req, res) => {
 module.exports = {
   initializeProgress,
   getDashboard,
+  getAllProgress,
+  setManualReminder,
+  setConceptManualReminder,
   getRecommendations,
   submitRetentionCheck,
   markRevisionComplete,

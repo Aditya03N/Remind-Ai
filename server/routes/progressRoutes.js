@@ -3,6 +3,9 @@ const router = express.Router();
 const {
   initializeProgress,
   getDashboard,
+  getAllProgress,
+  setManualReminder,
+  setConceptManualReminder,
   getRecommendations,
   submitRetentionCheck,
   markRevisionComplete,
@@ -15,6 +18,9 @@ router.use(protect);
 
 router.post("/initialize", initializeProgress);
 router.get("/dashboard", getDashboard);
+router.get("/all", getAllProgress);
+router.put("/:progressId/reminder", setManualReminder);
+router.put("/concept/:conceptId/reminder", setConceptManualReminder);
 router.get("/recommendations", getRecommendations);
 router.post("/retention-check", submitRetentionCheck);
 router.post("/revision-complete", markRevisionComplete);

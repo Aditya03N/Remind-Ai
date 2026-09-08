@@ -3,8 +3,10 @@ export const API_URL = "http://localhost:5000/api";
 export const fetchWithAuth = async (url, options = {}) => {
   const token = typeof window !== 'undefined' ? localStorage.getItem("token") : null;
   
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+
   const headers = {
-    "Content-Type": "application/json",
+    ...(!isFormData && { "Content-Type": "application/json" }),
     ...options.headers,
   };
 
@@ -16,6 +18,11 @@ export const fetchWithAuth = async (url, options = {}) => {
     ...options,
     headers,
   });
+
+  // If token is invalid or expired, remove it so subsequent requests don't fail
+  if (response.status === 401 && typeof window !== "undefined") {
+    localStorage.removeItem("token");
+  }
 
   return response;
 };
