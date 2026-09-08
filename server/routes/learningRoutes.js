@@ -7,9 +7,7 @@ const {
   getConceptsBySubject,
   createQuiz,
   getQuizByConcept,
-  saveAttempt,
-  saveStudyMaterial,
-  generateAIQuestions
+  saveAttempt
 } = require("../controllers/learningController");
 const { protect } = require("../middleware/authMiddleware");
 
@@ -21,9 +19,6 @@ router.get("/subjects", getSubjects);
 
 router.post("/concepts", createConcept);
 router.get("/concepts/subject/:subjectId", getConceptsBySubject);
-router.put("/concepts/:id/material", saveStudyMaterial);
-
-router.post("/ai/generate", generateAIQuestions);
 
 router.post("/quizzes", createQuiz);
 router.get("/quizzes/concept/:conceptId", getQuizByConcept);

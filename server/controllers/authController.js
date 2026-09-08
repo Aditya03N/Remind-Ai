@@ -9,10 +9,9 @@ const generateToken = (id) => {
 
 const registerUser = async (req, res) => {
   const { name, email, password } = req.body;
-  const normalizedEmail = email ? email.toLowerCase() : "";
 
   try {
-    const userExists = await User.findOne({ email: normalizedEmail });
+    const userExists = await User.findOne({ email });
 
     if (userExists) {
       return res.status(400).json({ message: "User already exists" });
@@ -20,7 +19,7 @@ const registerUser = async (req, res) => {
 
     const user = await User.create({
       name,
-      email: normalizedEmail,
+      email,
       password,
     });
 
@@ -41,10 +40,9 @@ const registerUser = async (req, res) => {
 
 const authUser = async (req, res) => {
   const { email, password } = req.body;
-  const normalizedEmail = email ? email.toLowerCase() : "";
 
   try {
-    const user = await User.findOne({ email: normalizedEmail });
+    const user = await User.findOne({ email });
 
     if (user && (await user.matchPassword(password))) {
       res.json({
@@ -81,13 +79,12 @@ const getUserProfile = async (req, res) => {
 const handleOAuthCallback = async (req, res) => {
   // Mock OAuth callback since we don't have real keys
   const { provider, email, name, id } = req.body;
-  const normalizedEmail = email ? email.toLowerCase() : "";
   
   try {
-    let user = await User.findOne({ email: normalizedEmail });
+    let user = await User.findOne({ email });
     
     if (!user) {
-      const userObj = { name, email: normalizedEmail };
+      const userObj = { name, email };
       if (provider === 'google') userObj.googleId = id;
       if (provider === 'github') userObj.githubId = id;
       user = await User.create(userObj);

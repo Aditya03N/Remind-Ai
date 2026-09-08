@@ -1,49 +1,6 @@
-"use client";
-
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { useAuth } from "../../context/AuthContext";
-import { fetchWithAuth } from "../../utils/api";
-import { useRouter } from "next/navigation";
 
 export default function RevisionPlan() {
-  const { user, loading: authLoading } = useAuth();
-  const [recommendations, setRecommendations] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const router = useRouter();
-
-  useEffect(() => {
-    if (!authLoading && !user) {
-      router.push("/login");
-    }
-  }, [user, authLoading, router]);
-
-  useEffect(() => {
-    const loadRecommendations = async () => {
-      try {
-        const res = await fetchWithAuth("/progress/recommendations");
-        if (res.ok) {
-          const data = await res.json();
-          setRecommendations(data);
-        }
-      } catch (error) {
-        console.error("Failed to fetch recommendations", error);
-      }
-      setLoading(false);
-    };
-
-    if (user) loadRecommendations();
-    else setLoading(false);
-  }, [user]);
-
-  if (authLoading || loading) return (
-    <div className="space-y-6 animate-pulse">
-      <div className="h-12 bg-surface-container-low rounded-lg w-1/3"></div>
-      <div className="h-96 bg-surface-container-low rounded-xl w-full"></div>
-    </div>
-  );
-  if (!user) return null;
-
   return (
     <>
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -65,39 +22,45 @@ export default function RevisionPlan() {
             </tr>
           </thead>
           <tbody className="divide-y divide-outline-variant/30">
-            {recommendations.length > 0 ? recommendations.map((rec) => (
-              <tr key={rec.progressId} className="hover:bg-surface-container transition-colors">
-                <td className="px-6 py-4 font-medium text-on-surface">{rec.concept?.name || 'Unknown Concept'}</td>
-                <td className="px-6 py-4">
-                  {rec.status === "CRITICAL" && (
-                    <span className="flex items-center gap-1.5 text-error">
-                      <div className="w-2 h-2 rounded-full bg-error"></div> Critical
-                    </span>
-                  )}
-                  {rec.status === "HIGH_RISK" && (
-                    <span className="flex items-center gap-1.5 text-amber-700">
-                      <div className="w-2 h-2 rounded-full bg-amber-500"></div> High Risk
-                    </span>
-                  )}
-                  {(rec.status === "MODERATE_RISK" || rec.status === "STRONG") && (
-                    <span className="flex items-center gap-1.5 text-amber-600">
-                      <div className="w-2 h-2 rounded-full bg-amber-400"></div> {rec.status}
-                    </span>
-                  )}
-                </td>
-                <td className="px-6 py-4 text-on-surface-variant">{Math.round(rec.estimatedRetention)}%</td>
-                <td className="px-6 py-4 text-on-surface-variant">{rec.recommendedDuration} mins</td>
-                <td className="px-6 py-4 text-right">
-                  <Link href={`/retention-check/${rec.concept?._id}`} className="text-primary hover:text-primary-container font-medium">Revise →</Link>
-                </td>
-              </tr>
-            )) : (
-              <tr>
-                <td colSpan="5" className="px-6 py-8 text-center text-on-surface-variant">
-                  No concepts need revision right now. Great job!
-                </td>
-              </tr>
-            )}
+            <tr className="hover:bg-surface-container transition-colors">
+              <td className="px-6 py-4 font-medium text-on-surface">Linked List</td>
+              <td className="px-6 py-4">
+                <span className="flex items-center gap-1.5 text-error">
+                  <div className="w-2 h-2 rounded-full bg-error"></div> Critical
+                </span>
+              </td>
+              <td className="px-6 py-4 text-on-surface-variant">38%</td>
+              <td className="px-6 py-4 text-on-surface-variant">15–20 mins</td>
+              <td className="px-6 py-4 text-right">
+                <Link href="/concept/1" className="text-primary hover:text-primary-container font-medium">Revise →</Link>
+              </td>
+            </tr>
+            <tr className="hover:bg-surface-container transition-colors">
+              <td className="px-6 py-4 font-medium text-on-surface">Merge Sort</td>
+              <td className="px-6 py-4">
+                <span className="flex items-center gap-1.5 text-amber-700">
+                  <div className="w-2 h-2 rounded-full bg-amber-500"></div> High Risk
+                </span>
+              </td>
+              <td className="px-6 py-4 text-on-surface-variant">52%</td>
+              <td className="px-6 py-4 text-on-surface-variant">10–15 mins</td>
+              <td className="px-6 py-4 text-right">
+                <Link href="/concept/2" className="text-primary hover:text-primary-container font-medium">Revise →</Link>
+              </td>
+            </tr>
+            <tr className="hover:bg-surface-container transition-colors">
+              <td className="px-6 py-4 font-medium text-on-surface">Binary Search</td>
+              <td className="px-6 py-4">
+                <span className="flex items-center gap-1.5 text-amber-600">
+                  <div className="w-2 h-2 rounded-full bg-amber-400"></div> Moderate
+                </span>
+              </td>
+              <td className="px-6 py-4 text-on-surface-variant">68%</td>
+              <td className="px-6 py-4 text-on-surface-variant">5–10 mins</td>
+              <td className="px-6 py-4 text-right">
+                <Link href="/concept/3" className="text-primary hover:text-primary-container font-medium">Revise →</Link>
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>

@@ -18,13 +18,6 @@ const conceptSchema = new mongoose.Schema({
   description: {
     type: String,
   },
-  studyMaterial: {
-    type: String,
-  },
-  baselineTaken: {
-    type: Boolean,
-    default: false,
-  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",

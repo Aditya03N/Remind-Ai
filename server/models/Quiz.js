@@ -12,19 +12,6 @@ const questionSchema = new mongoose.Schema({
   correctOptionIndex: {
     type: Number,
     required: true,
-  },
-  explanation: {
-    type: String,
-  },
-  difficulty: {
-    type: String,
-    enum: ["Easy", "Medium", "Hard"],
-    default: "Medium",
-  },
-  source: {
-    type: String,
-    enum: ["manual", "ai_topic", "ai_material"],
-    default: "manual",
   }
 });
 

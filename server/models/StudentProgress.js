@@ -65,9 +65,6 @@ const studentProgressSchema = new mongoose.Schema({
   nextReviewDate: {
     type: Date,
   },
-  manualReminderDate: {
-    type: Date,
-  },
   learningDate: {
     type: Date,
     default: Date.now,
