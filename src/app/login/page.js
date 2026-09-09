@@ -23,7 +23,7 @@ export default function Login() {
     e.preventDefault();
     setError("");
     setIsSubmitting(true);
-    
+
     try {
       const res = await login(email, password);
       if (res.success) {
@@ -41,13 +41,21 @@ export default function Login() {
   return (
     <div className="w-full flex items-center justify-center">
       <div className="w-full max-w-md bg-surface-container-lowest rounded-2xl shadow-[0_8px_30px_rgba(124,58,237,0.08)] border border-outline-variant/40 p-8">
-        
         <div className="text-center mb-8">
           <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center text-on-primary font-bold shadow-sm mx-auto mb-4">
-            <span className="material-symbols-outlined text-3xl">psychology</span>
+            <span className="material-symbols-outlined text-3xl">
+              psychology
+            </span>
           </div>
-          <h2 className="text-2xl font-bold text-on-surface" style={{fontFamily: "var(--font-headline-md)"}}>Welcome back</h2>
-          <p className="text-sm text-on-surface-variant mt-2">Log in to track your knowledge decay.</p>
+          <h2
+            className="text-2xl font-bold text-on-surface"
+            style={{ fontFamily: "var(--font-headline-md)" }}
+          >
+            Welcome back
+          </h2>
+          <p className="text-sm text-on-surface-variant mt-2">
+            Log in to track your knowledge decay.
+          </p>
         </div>
 
         {error && (
@@ -59,9 +67,11 @@ export default function Login() {
 
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-on-surface mb-1">Email</label>
-            <input 
-              type="email" 
+            <label className="block text-sm font-medium text-on-surface mb-1">
+              Email
+            </label>
+            <input
+              type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full bg-surface-container-low border border-outline-variant rounded-xl px-4 py-3 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
@@ -70,9 +80,11 @@ export default function Login() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-on-surface mb-1">Password</label>
-            <input 
-              type="password" 
+            <label className="block text-sm font-medium text-on-surface mb-1">
+              Password
+            </label>
+            <input
+              type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full bg-surface-container-low border border-outline-variant rounded-xl px-4 py-3 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
@@ -80,17 +92,24 @@ export default function Login() {
               required
             />
           </div>
-          
+
           <div className="flex items-center justify-between mt-2">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" className="rounded border-outline-variant text-primary focus:ring-primary" />
-              <span className="text-xs text-on-surface-variant">Remember me</span>
+              <input
+                type="checkbox"
+                className="rounded border-outline-variant text-primary focus:ring-primary"
+              />
+              <span className="text-xs text-on-surface-variant">
+                Remember me
+              </span>
             </label>
-            <span className="text-xs font-medium text-primary cursor-pointer hover:underline">Forgot password?</span>
+            <span className="text-xs font-medium text-primary cursor-pointer hover:underline">
+              Forgot password?
+            </span>
           </div>
 
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             disabled={isSubmitting}
             className="w-full py-3 bg-primary hover:bg-primary-container text-on-primary font-bold rounded-xl shadow-md transition-all mt-4 disabled:opacity-60 flex items-center justify-center gap-2"
           >
@@ -106,7 +125,13 @@ export default function Login() {
         </form>
 
         <p className="mt-8 text-center text-sm text-on-surface-variant">
-          Don't have an account? <Link href="/signup" className="font-medium text-primary hover:underline">Sign up</Link>
+          Don't have an account?{" "}
+          <Link
+            href="/signup"
+            className="font-medium text-primary hover:underline"
+          >
+            Sign up
+          </Link>
         </p>
       </div>
     </div>
