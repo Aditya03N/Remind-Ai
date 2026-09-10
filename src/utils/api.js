@@ -1,4 +1,4 @@
-export const API_URL = "http://localhost:5000/api";
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
 export const fetchWithAuth = async (url, options = {}) => {
   const token = typeof window !== 'undefined' ? localStorage.getItem("token") : null;
