@@ -270,6 +270,19 @@ export default function RetentionCheck({ params: paramsPromise }) {
             <span>{uploadingDoc ? "Uploading..." : concept?.notesFileName ? "Change Notes" : "Upload Notes"}</span>
           </button>
 
+          {/* Generate Fresh Quiz Button */}
+          <button
+            onClick={handleGenerateQuestions}
+            disabled={generating}
+            className="px-3 py-1.5 text-xs rounded-lg font-semibold bg-secondary-container text-on-secondary-container hover:bg-secondary hover:text-on-secondary transition-all flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+            title="Generate a brand new set of 10 questions with AI"
+          >
+            <span className={`material-symbols-outlined text-sm ${generating ? "animate-spin" : ""}`}>
+              {generating ? "sync" : "auto_awesome"}
+            </span>
+            <span>{generating ? "Generating Fresh..." : "Generate Fresh Quiz"}</span>
+          </button>
+
           {/* Summary Toggle / Generate Button */}
           <button
             onClick={() => {
@@ -283,10 +296,12 @@ export default function RetentionCheck({ params: paramsPromise }) {
             className={`px-3 py-1.5 text-xs rounded-lg font-semibold transition-all flex items-center gap-1.5 shadow-xs ${
               showSummary 
                 ? "bg-primary text-on-primary" 
-                : "bg-secondary-fixed text-on-secondary-fixed hover:brightness-95"
+                : "bg-surface-container-low border border-outline-variant text-on-surface hover:bg-surface-variant"
             }`}
           >
-            <span className="material-symbols-outlined text-sm">summarize</span>
+            <span className="material-symbols-outlined text-sm">
+              {concept?.aiSummary && showSummary ? "visibility_off" : "summarize"}
+            </span>
             <span>
               {generatingSummary 
                 ? "Generating..." 

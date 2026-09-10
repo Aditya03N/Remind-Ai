@@ -441,7 +441,7 @@ export default function Dashboard() {
                       href={`/concept/${topic.conceptId}`}
                       className="px-3.5 py-1.5 bg-surface-container-low hover:bg-primary hover:text-on-primary text-on-surface text-xs font-semibold rounded-lg transition-all flex items-center gap-1"
                     >
-                      <span>Study &amp; Quiz</span>
+                      <span>Start Revision / Quiz</span>
                       <span className="material-symbols-outlined text-xs">arrow_forward</span>
                     </Link>
                   </div>
