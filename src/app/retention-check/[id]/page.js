@@ -20,6 +20,7 @@ export default function RetentionCheck({ params: paramsPromise }) {
   const [generating, setGenerating] = useState(false);
   const [generatingSummary, setGeneratingSummary] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const fileInputRef = useRef(null);
 
@@ -88,9 +89,14 @@ export default function RetentionCheck({ params: paramsPromise }) {
       if (res.ok) {
         const data = await res.json();
         toast.success(`Notes "${data.fileName}" loaded! Generating questions...`, { id: "upload-quiz-doc" });
-        await loadQuizData();
-        // Automatically generate 10 questions from the newly uploaded document
-        handleGenerateQuestions();
+        setConcept(prev => ({
+          ...(prev || {}),
+          studyMaterial: data.studyMaterial,
+          notesFileName: data.fileName,
+          aiSummary: data.concept?.aiSummary || prev?.aiSummary
+        }));
+        // Automatically generate 10 questions from the newly uploaded document directly
+        await handleGenerateQuestions(data.studyMaterial, data.fileName);
       } else {
         const err = await res.json();
         toast.error(err.message || "Failed to upload document", { id: "upload-quiz-doc" });
@@ -102,14 +108,20 @@ export default function RetentionCheck({ params: paramsPromise }) {
     }
   };
 
-  const handleGenerateQuestions = async () => {
+  const handleGenerateQuestions = async (overrideMaterial, overrideFileName) => {
     setGenerating(true);
-    const hasDoc = !!concept?.notesFileName;
-    toast.loading(hasDoc ? `Generating 10 questions from "${concept.notesFileName}"...` : "Generating 10 AI active-recall questions...", { id: "gen-q" });
+    const materialText = typeof overrideMaterial === "string" ? overrideMaterial : (concept?.studyMaterial || "");
+    const fileName = typeof overrideFileName === "string" ? overrideFileName : concept?.notesFileName;
+    const hasDoc = !!fileName || (typeof materialText === "string" && materialText.trim().length > 0);
+    toast.loading(hasDoc ? `Analyzing "${fileName || "Notes"}" & generating 10 questions...` : "Generating 10 AI active-recall questions...", { id: "gen-q" });
     try {
       const res = await fetchWithAuth("/learning/ai/generate", {
         method: "POST",
-        body: JSON.stringify({ conceptId, count: 10, studyMaterial: concept?.studyMaterial || "" })
+        body: JSON.stringify({ 
+          conceptId, 
+          count: 10, 
+          studyMaterial: (typeof materialText === "string" && materialText.trim().length > 0) ? materialText.trim() : undefined 
+        })
       });
       if (res.ok) {
         const data = await res.json();
@@ -118,25 +130,31 @@ export default function RetentionCheck({ params: paramsPromise }) {
         setCurrentIndex(0);
         setSubmitted(false);
         setScoreResult(null);
-        toast.success("10 Questions ready! Starting quiz...", { id: "gen-q" });
+        setStartTime(Date.now());
+        toast.success("10 Questions ready from notes! Starting quiz...", { id: "gen-q" });
       } else {
         const err = await res.json();
         toast.error(err.message || "Failed to generate questions", { id: "gen-q" });
       }
     } catch (err) {
+      console.error("Generate questions error:", err);
       toast.error("Error generating questions", { id: "gen-q" });
     } finally {
       setGenerating(false);
     }
   };
 
-  const handleGenerateSummary = async () => {
+  const handleGenerateSummary = async (overrideMaterial) => {
     setGeneratingSummary(true);
-    toast.loading("Synthesizing pre-quiz summary...", { id: "gen-sum" });
+    const materialText = typeof overrideMaterial === "string" ? overrideMaterial : (concept?.studyMaterial || "");
+    toast.loading("Synthesizing pre-quiz summary from notes...", { id: "gen-sum" });
     try {
       const res = await fetchWithAuth("/learning/ai/summary", {
         method: "POST",
-        body: JSON.stringify({ conceptId, studyMaterial: concept?.studyMaterial || "" })
+        body: JSON.stringify({ 
+          conceptId, 
+          studyMaterial: (typeof materialText === "string" && materialText.trim().length > 0) ? materialText.trim() : undefined 
+        })
       });
       if (res.ok) {
         const data = await res.json();
@@ -148,6 +166,7 @@ export default function RetentionCheck({ params: paramsPromise }) {
         toast.error(err.message || "Failed to generate summary", { id: "gen-sum" });
       }
     } catch (err) {
+      console.error("Generate summary error:", err);
       toast.error("Error generating summary", { id: "gen-sum" });
     } finally {
       setGeneratingSummary(false);
@@ -164,8 +183,9 @@ export default function RetentionCheck({ params: paramsPromise }) {
 
   const handleSubmitQuiz = async () => {
     const questions = quiz?.questions || [];
-    if (questions.length === 0) return;
+    if (questions.length === 0 || submitting) return;
 
+    setSubmitting(true);
     let correctCount = 0;
     questions.forEach((q, idx) => {
       if (answers[idx] === q.correctOptionIndex) {
@@ -204,6 +224,8 @@ export default function RetentionCheck({ params: paramsPromise }) {
     } catch (err) {
       console.error("Save attempt error:", err);
       toast.error("Failed to record score.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -223,18 +245,56 @@ export default function RetentionCheck({ params: paramsPromise }) {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-16">
-      {/* Hidden File Input */}
+      {/* Hidden File Input for all document types */}
       <input 
         type="file"
         ref={fileInputRef}
-        accept=".pdf,.txt,.md,.doc,.docx"
+        accept=".docx,.doc,.pdf,.txt,.md,.rtf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/pdf,text/*"
         className="hidden"
         onChange={(e) => {
           if (e.target.files?.[0]) {
             handleFileUpload(e.target.files[0]);
+            e.target.value = "";
           }
         }}
       />
+
+      {/* Active Processing Indicator Banner */}
+      {generating && (
+        <div className="p-4 rounded-xl bg-primary/10 border border-primary/30 flex items-center gap-3 shadow-xs animate-in fade-in duration-300">
+          <span className="material-symbols-outlined text-primary text-2xl animate-spin">
+            progress_activity
+          </span>
+          <div className="space-y-0.5">
+            <h4 className="text-sm font-bold text-on-surface">Generating 10 Active-Recall Questions...</h4>
+            <p className="text-xs text-on-surface-variant">AI is reviewing your syllabus & notes to create high-retention questions. This takes just a few seconds.</p>
+          </div>
+        </div>
+      )}
+
+      {uploadingDoc && (
+        <div className="p-4 rounded-xl bg-secondary/10 border border-secondary/30 flex items-center gap-3 shadow-xs animate-in fade-in duration-300">
+          <span className="material-symbols-outlined text-secondary text-2xl animate-spin">
+            progress_activity
+          </span>
+          <div className="space-y-0.5">
+            <h4 className="text-sm font-bold text-on-surface">Processing & Parsing Document...</h4>
+            <p className="text-xs text-on-surface-variant">Extracting text notes and preparing AI question generation.</p>
+          </div>
+        </div>
+      )}
+
+      {generatingSummary && (
+        <div className="p-4 rounded-xl bg-primary-fixed/25 border border-primary/30 flex items-center gap-3 shadow-xs animate-in fade-in duration-300">
+          <span className="material-symbols-outlined text-primary text-2xl animate-spin">
+            progress_activity
+          </span>
+          <div className="space-y-0.5">
+            <h4 className="text-sm font-bold text-on-surface">Synthesizing High-Yield Summary...</h4>
+            <p className="text-xs text-on-surface-variant">AI is summarizing core definitions and revision cues from your material.</p>
+          </div>
+        </div>
+      )}
 
       {/* Navigation Breadcrumb */}
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -260,27 +320,27 @@ export default function RetentionCheck({ params: paramsPromise }) {
           {/* Upload Notes Button */}
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploadingDoc}
-            className="px-3 py-1.5 text-xs rounded-lg font-semibold bg-surface-container-low border border-outline-variant text-on-surface hover:bg-surface-variant transition-all flex items-center gap-1.5 shadow-xs"
-            title="Upload notes/PDF under 5MB for specific question generation"
+            disabled={uploadingDoc || generating}
+            className="px-3 py-1.5 text-xs rounded-lg font-semibold bg-surface-container-low border border-outline-variant text-on-surface hover:bg-surface-variant transition-all flex items-center gap-1.5 shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Upload Word (.docx / .doc), PDF, or text notes under 5MB for specific question generation"
           >
-            <span className="material-symbols-outlined text-sm">
+            <span className={`material-symbols-outlined text-sm ${uploadingDoc ? "animate-spin" : ""}`}>
               {uploadingDoc ? "progress_activity" : "upload_file"}
             </span>
-            <span>{uploadingDoc ? "Uploading..." : concept?.notesFileName ? "Change Notes" : "Upload Notes"}</span>
+            <span>{uploadingDoc ? "Uploading..." : concept?.notesFileName ? "Change Document" : "Upload Word / Notes"}</span>
           </button>
 
           {/* Generate Fresh Quiz Button */}
           <button
-            onClick={handleGenerateQuestions}
-            disabled={generating}
-            className="px-3 py-1.5 text-xs rounded-lg font-semibold bg-secondary-container text-on-secondary-container hover:bg-secondary hover:text-on-secondary transition-all flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+            onClick={() => handleGenerateQuestions()}
+            disabled={generating || uploadingDoc}
+            className="px-3 py-1.5 text-xs rounded-lg font-semibold bg-secondary-container text-on-secondary-container hover:bg-secondary hover:text-on-secondary transition-all flex items-center gap-1.5 shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
             title="Generate a brand new set of 10 questions with AI"
           >
             <span className={`material-symbols-outlined text-sm ${generating ? "animate-spin" : ""}`}>
-              {generating ? "sync" : "auto_awesome"}
+              {generating ? "progress_activity" : "auto_awesome"}
             </span>
-            <span>{generating ? "Generating Fresh..." : "Generate Fresh Quiz"}</span>
+            <span>{generating ? "Generating Fresh Quiz..." : "Generate Fresh Quiz"}</span>
           </button>
 
           {/* Summary Toggle / Generate Button */}
@@ -293,18 +353,18 @@ export default function RetentionCheck({ params: paramsPromise }) {
               }
             }}
             disabled={generatingSummary}
-            className={`px-3 py-1.5 text-xs rounded-lg font-semibold transition-all flex items-center gap-1.5 shadow-xs ${
+            className={`px-3 py-1.5 text-xs rounded-lg font-semibold transition-all flex items-center gap-1.5 shadow-xs disabled:opacity-50 ${
               showSummary 
                 ? "bg-primary text-on-primary" 
                 : "bg-surface-container-low border border-outline-variant text-on-surface hover:bg-surface-variant"
             }`}
           >
-            <span className="material-symbols-outlined text-sm">
-              {concept?.aiSummary && showSummary ? "visibility_off" : "summarize"}
+            <span className={`material-symbols-outlined text-sm ${generatingSummary ? "animate-spin" : ""}`}>
+              {generatingSummary ? "progress_activity" : concept?.aiSummary && showSummary ? "visibility_off" : "summarize"}
             </span>
             <span>
               {generatingSummary 
-                ? "Generating..." 
+                ? "Generating Summary..." 
                 : showSummary 
                 ? "Hide Summary" 
                 : concept?.aiSummary 
@@ -333,13 +393,15 @@ export default function RetentionCheck({ params: paramsPromise }) {
             
             <div className="flex items-center gap-2">
               <button 
-                onClick={handleGenerateSummary}
+                onClick={() => handleGenerateSummary()}
                 disabled={generatingSummary}
-                className="text-xs text-primary font-semibold hover:underline flex items-center gap-1 p-1"
+                className="text-xs text-primary font-semibold hover:underline flex items-center gap-1 p-1 disabled:opacity-50"
                 title="Regenerate Summary"
               >
-                <span className="material-symbols-outlined text-xs">refresh</span>
-                <span>Refresh</span>
+                <span className={`material-symbols-outlined text-xs ${generatingSummary ? "animate-spin" : ""}`}>
+                  {generatingSummary ? "progress_activity" : "refresh"}
+                </span>
+                <span>{generatingSummary ? "Regenerating..." : "Refresh"}</span>
               </button>
               <button 
                 onClick={() => setShowSummary(false)}
@@ -357,12 +419,14 @@ export default function RetentionCheck({ params: paramsPromise }) {
           {questions.length === 0 && (
             <div className="pt-2 flex justify-end">
               <button
-                onClick={handleGenerateQuestions}
+                onClick={() => handleGenerateQuestions()}
                 disabled={generating}
-                className="px-5 py-2.5 bg-primary text-on-primary text-xs font-bold rounded-xl shadow-sm hover:bg-primary-container transition-all flex items-center gap-1.5"
+                className="px-5 py-2.5 bg-primary text-on-primary text-xs font-bold rounded-xl shadow-sm hover:bg-primary-container transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span className="material-symbols-outlined text-sm">play_arrow</span>
-                <span>Ready! Generate 10 Quiz Questions</span>
+                <span className={`material-symbols-outlined text-sm ${generating ? "animate-spin" : ""}`}>
+                  {generating ? "progress_activity" : "play_arrow"}
+                </span>
+                <span>{generating ? "Generating 10 Questions..." : "Ready! Generate 10 Quiz Questions"}</span>
               </button>
             </div>
           )}
@@ -387,40 +451,37 @@ export default function RetentionCheck({ params: paramsPromise }) {
           <div className="flex flex-wrap items-center justify-center gap-3">
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={uploadingDoc}
-              className="px-4 py-2.5 bg-surface-container-low border border-outline-variant text-on-surface hover:bg-surface-variant text-xs font-bold rounded-xl transition-all flex items-center gap-1.5"
+              disabled={uploadingDoc || generating}
+              className="px-4 py-2.5 bg-surface-container-low border border-outline-variant text-on-surface hover:bg-surface-variant text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <span className="material-symbols-outlined text-sm">upload_file</span>
-              <span>{uploadingDoc ? "Uploading..." : "Upload Notes / PDF"}</span>
+              <span className={`material-symbols-outlined text-sm ${uploadingDoc ? "animate-spin" : ""}`}>
+                {uploadingDoc ? "progress_activity" : "upload_file"}
+              </span>
+              <span>{uploadingDoc ? "Uploading..." : "Upload Word / PDF / Notes"}</span>
             </button>
 
             {!concept?.aiSummary && (
               <button
-                onClick={handleGenerateSummary}
-                disabled={generatingSummary}
-                className="px-5 py-2.5 bg-secondary-fixed text-on-secondary-fixed text-xs font-bold rounded-xl hover:brightness-95 transition-all flex items-center gap-1.5"
+                onClick={() => handleGenerateSummary()}
+                disabled={generatingSummary || generating}
+                className="px-5 py-2.5 bg-secondary-fixed text-on-secondary-fixed text-xs font-bold rounded-xl hover:brightness-95 transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span className="material-symbols-outlined text-sm">summarize</span>
-                <span>{generatingSummary ? "Generating..." : "Generate Summary First"}</span>
+                <span className={`material-symbols-outlined text-sm ${generatingSummary ? "animate-spin" : ""}`}>
+                  {generatingSummary ? "progress_activity" : "summarize"}
+                </span>
+                <span>{generatingSummary ? "Generating Summary..." : "Generate Summary First"}</span>
               </button>
             )}
 
             <button
-              onClick={handleGenerateQuestions}
-              disabled={generating}
-              className="px-6 py-3 bg-primary hover:bg-primary-container text-on-primary text-sm font-bold rounded-xl shadow-md transition-all flex items-center gap-2 disabled:opacity-60"
+              onClick={() => handleGenerateQuestions()}
+              disabled={generating || uploadingDoc}
+              className="px-6 py-3 bg-primary hover:bg-primary-container text-on-primary text-sm font-bold rounded-xl shadow-md transition-all flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {generating ? (
-                <>
-                  <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin"></span>
-                  <span>Generating 10 Questions...</span>
-                </>
-              ) : (
-                <>
-                  <span className="material-symbols-outlined">auto_awesome</span>
-                  <span>{concept?.notesFileName ? "Generate 10 Qs From Notes" : "Generate 10 Questions with AI"}</span>
-                </>
-              )}
+              <span className={`material-symbols-outlined ${generating ? "animate-spin" : ""}`}>
+                {generating ? "progress_activity" : "auto_awesome"}
+              </span>
+              <span>{generating ? "Generating 10 Questions..." : (concept?.notesFileName ? "Generate 10 Qs From Notes" : "Generate 10 Questions with AI")}</span>
             </button>
           </div>
         </div>
@@ -465,12 +526,14 @@ export default function RetentionCheck({ params: paramsPromise }) {
               </button>
 
               <button
-                onClick={handleGenerateQuestions}
+                onClick={() => handleGenerateQuestions()}
                 disabled={generating}
-                className="px-5 py-2.5 bg-primary text-on-primary text-xs font-bold rounded-xl shadow-sm hover:bg-primary-container transition-all flex items-center gap-1.5"
+                className="px-5 py-2.5 bg-primary text-on-primary text-xs font-bold rounded-xl shadow-sm hover:bg-primary-container transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span className="material-symbols-outlined text-sm">auto_awesome</span>
-                <span>Generate 10 Fresh Questions</span>
+                <span className={`material-symbols-outlined text-sm ${generating ? "animate-spin" : ""}`}>
+                  {generating ? "progress_activity" : "auto_awesome"}
+                </span>
+                <span>{generating ? "Generating 10 Fresh Questions..." : "Generate 10 Fresh Questions"}</span>
               </button>
 
               <Link
@@ -661,11 +724,13 @@ export default function RetentionCheck({ params: paramsPromise }) {
               ) : (
                 <button
                   onClick={handleSubmitQuiz}
-                  disabled={!isComplete}
+                  disabled={!isComplete || submitting}
                   className="px-6 py-2.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <span className="material-symbols-outlined text-sm">check_circle</span>
-                  <span>Submit Quiz ({answeredCount}/{questions.length})</span>
+                  <span className={`material-symbols-outlined text-sm ${submitting ? "animate-spin" : ""}`}>
+                    {submitting ? "progress_activity" : "check_circle"}
+                  </span>
+                  <span>{submitting ? "Submitting Quiz..." : `Submit Quiz (${answeredCount}/${questions.length})`}</span>
                 </button>
               )}
             </div>

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useAuth } from "../context/AuthContext";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Toaster } from "react-hot-toast";
 
 export default function AppLayoutWrapper({ children }) {
   const { user, logout, loading } = useAuth();
@@ -41,6 +42,7 @@ export default function AppLayoutWrapper({ children }) {
   if (!user || isAuthPage) {
     return (
       <main className="flex-1 w-full min-h-screen flex flex-col justify-center items-center bg-surface px-4 py-8">
+        <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
         {children}
       </main>
     );
@@ -198,6 +200,7 @@ export default function AppLayoutWrapper({ children }) {
         </header>
 
         <main className="flex-1 p-4 md:p-8 max-w-7xl w-full mx-auto flex flex-col gap-8">
+          <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
           {children}
         </main>
       </div>

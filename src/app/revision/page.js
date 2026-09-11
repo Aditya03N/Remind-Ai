@@ -16,6 +16,7 @@ export default function RevisionPlan() {
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState("ALL");
   const [savingReminder, setSavingReminder] = useState(null);
+  const [selectedDates, setSelectedDates] = useState({});
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -23,9 +24,9 @@ export default function RevisionPlan() {
     }
   }, [user, authLoading, router]);
 
-  const loadData = async () => {
+  const loadData = async (isSilent = false) => {
     try {
-      setLoading(true);
+      if (!isSilent) setLoading(true);
       const [dashRes, allRes] = await Promise.all([
         fetchWithAuth("/progress/dashboard"),
         fetchWithAuth("/progress/all")
@@ -44,7 +45,7 @@ export default function RevisionPlan() {
       console.error("Failed to load revision data:", err);
       toast.error("Failed to load revision topics.");
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   };
 
@@ -57,14 +58,21 @@ export default function RevisionPlan() {
   const handleSetReminder = async (progressId, dateValue) => {
     setSavingReminder(progressId);
     try {
+      const isoDate = dateValue ? new Date(dateValue).toISOString() : null;
       const res = await fetchWithAuth(`/progress/${progressId}/reminder`, {
         method: "PUT",
-        body: JSON.stringify({ manualReminderDate: dateValue || null })
+        body: JSON.stringify({ manualReminderDate: isoDate })
       });
 
       if (res.ok) {
         toast.success(dateValue ? "Revision date scheduled!" : "Revision schedule removed!");
-        await loadData();
+        setAllProgress(prev => prev.map(p => p._id === progressId ? { ...p, manualReminderDate: isoDate } : p));
+        setSelectedDates(prev => {
+          const next = { ...prev };
+          delete next[progressId];
+          return next;
+        });
+        await loadData(true);
       } else {
         toast.error("Failed to update revision schedule.");
       }
@@ -78,8 +86,9 @@ export default function RevisionPlan() {
   const formatDateForInput = (dateString) => {
     if (!dateString) return "";
     const date = new Date(dateString);
-    const tzoffset = (new Date()).getTimezoneOffset() * 60000;
-    return new Date(date - tzoffset).toISOString().slice(0, 16);
+    if (isNaN(date.getTime())) return "";
+    const tzoffset = date.getTimezoneOffset() * 60000;
+    return new Date(date.getTime() - tzoffset).toISOString().slice(0, 16);
   };
 
   if (authLoading || loading) {
@@ -404,14 +413,29 @@ export default function RevisionPlan() {
                         <div className="flex items-center gap-2">
                           <input 
                             type="datetime-local"
-                            value={formatDateForInput(prog.manualReminderDate)}
-                            onChange={(e) => handleSetReminder(prog._id, e.target.value)}
+                            value={selectedDates[prog._id] !== undefined ? selectedDates[prog._id] : formatDateForInput(prog.manualReminderDate)}
+                            onChange={(e) => setSelectedDates(prev => ({ ...prev, [prog._id]: e.target.value }))}
                             disabled={savingReminder === prog._id}
                             className="bg-surface-container border border-outline-variant rounded-lg px-2.5 py-1.5 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                           />
+                          {selectedDates[prog._id] !== undefined && selectedDates[prog._id] !== formatDateForInput(prog.manualReminderDate) && selectedDates[prog._id] !== "" && (
+                            <button
+                              onClick={() => handleSetReminder(prog._id, selectedDates[prog._id])}
+                              disabled={savingReminder === prog._id}
+                              className="px-2.5 py-1.5 bg-primary text-on-primary text-xs font-bold rounded-lg hover:bg-primary-container transition-all flex items-center gap-1 shadow-xs shrink-0 disabled:opacity-50"
+                              title="Confirm and set revision date/time"
+                            >
+                              <span className="material-symbols-outlined text-xs">check</span>
+                              <span>{savingReminder === prog._id ? "Saving..." : "Set"}</span>
+                            </button>
+                          )}
                           {prog.manualReminderDate && (
                             <button
-                              onClick={() => handleSetReminder(prog._id, null)}
+                              onClick={() => {
+                                setSelectedDates(prev => ({ ...prev, [prog._id]: "" }));
+                                handleSetReminder(prog._id, null);
+                              }}
+                              disabled={savingReminder === prog._id}
                               className="p-1 rounded-md text-error hover:bg-error-container/20 transition-colors"
                               title="Clear manual schedule"
                             >

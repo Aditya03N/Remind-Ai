@@ -141,7 +141,7 @@ const getDashboard = async (req, res) => {
           estimatedRetention: Math.round(prog.estimatedRetention),
           status: prog.knowledgeStatus,
           priorityScore,
-          recommendedDuration: duration,
+          recommendedDuration: `${duration.minMinutes}–${duration.maxMinutes} mins`,
           manualReminderDate: prog.manualReminderDate || null
         });
       }

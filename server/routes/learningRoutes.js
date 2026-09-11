@@ -10,6 +10,7 @@ const {
   getConceptById,
   deleteConcept,
   saveStudyMaterial,
+  clearStudyMaterial,
   uploadNotesDocument,
   generateAIQuestions,
   generateAISummary,
@@ -32,6 +33,7 @@ router.get("/concepts/:id", getConceptById);
 router.delete("/concepts/:id", deleteConcept);
 
 router.put("/concepts/:conceptId/material", saveStudyMaterial);
+router.delete("/concepts/:conceptId/material", clearStudyMaterial);
 router.post("/concepts/:conceptId/upload-material", upload.single("file"), uploadNotesDocument);
 
 router.post("/ai/generate", generateAIQuestions);

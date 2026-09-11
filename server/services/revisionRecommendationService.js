@@ -2,37 +2,38 @@ const { getDaysSince, determineKnowledgeStatus } = require("./retentionService")
 
 /**
  * Calculate revision priority score.
- * priority = riskScore + difficultyWeight + overdueDaysWeight + weakPerformanceWeight
+ * Higher score = more urgently needs revision.
+ * @param {number} estimatedRetention - Current estimated retention percentage
+ * @param {string} difficulty - "Easy", "Medium", or "Hard"
+ * @param {string} knowledgeStatus - "STRONG", "MODERATE_RISK", "HIGH_RISK", "CRITICAL"
  */
-const calculatePriority = (estimatedRetention, difficulty, daysSinceAssessment, previousScore) => {
+const calculatePriority = (estimatedRetention, difficulty, knowledgeStatus) => {
   // 1. Risk Score: lower retention -> higher risk score
   let riskScore = 100 - estimatedRetention;
 
   // 2. Difficulty Weight
   let difficultyWeight = 0;
   if (difficulty === "Hard") difficultyWeight = 20;
-  if (difficulty === "Medium") difficultyWeight = 10;
+  else if (difficulty === "Medium") difficultyWeight = 10;
 
-  // 3. Overdue Days Weight (cap at 30 to avoid blowing up)
-  let overdueDaysWeight = Math.min(daysSinceAssessment, 30) * 1.5;
+  // 3. Status Weight
+  let statusWeight = 0;
+  if (knowledgeStatus === "CRITICAL") statusWeight = 30;
+  else if (knowledgeStatus === "HIGH_RISK") statusWeight = 20;
+  else if (knowledgeStatus === "MODERATE_RISK") statusWeight = 10;
 
-  // 4. Weak Performance Weight
-  let weakPerformanceWeight = 0;
-  if (previousScore < 60) {
-    weakPerformanceWeight = 25;
-  } else if (previousScore < 80) {
-    weakPerformanceWeight = 10;
-  }
-
-  return Math.round(riskScore + difficultyWeight + overdueDaysWeight + weakPerformanceWeight);
+  return Math.round(riskScore + difficultyWeight + statusWeight);
 };
 
 /**
- * Estimate required revision duration based on status and difficulty.
+ * Estimate required revision duration based on difficulty and status.
+ * @param {string} difficulty - "Easy", "Medium", or "Hard"
+ * @param {string} status - Knowledge status string
+ * @returns {{ minMinutes: number, maxMinutes: number } | string}
  */
-const estimateRevisionDuration = (status, difficulty) => {
+const estimateRevisionDuration = (difficulty, status) => {
   if (status === "STRONG" || status === "MASTERED") {
-    return "No revision required";
+    return { minMinutes: 0, maxMinutes: 0 };
   }
 
   let min = 5;
@@ -51,10 +52,11 @@ const estimateRevisionDuration = (status, difficulty) => {
     min += 5; max += 5;
   }
 
-  return `${min}–${max} minutes`;
+  return { minMinutes: min, maxMinutes: max };
 };
 
 module.exports = {
   calculatePriority,
   estimateRevisionDuration,
 };
+

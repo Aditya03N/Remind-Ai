@@ -64,12 +64,16 @@ export default function ConceptDetails({ params: paramsPromise }) {
     setGeneratingQuiz(true);
     toast.loading("Generating 10 fresh AI active-recall questions...", { id: "fresh-quiz" });
     try {
+      const materialText = (typeof concept?.studyMaterial === "string" && concept.studyMaterial.trim().length > 0)
+        ? concept.studyMaterial.trim()
+        : undefined;
+
       const res = await fetchWithAuth("/learning/ai/generate", {
         method: "POST",
         body: JSON.stringify({
           conceptId,
           count: 10,
-          studyMaterial: concept?.studyMaterial || ""
+          studyMaterial: materialText
         })
       });
       if (res.ok) {
@@ -95,11 +99,15 @@ export default function ConceptDetails({ params: paramsPromise }) {
     setGeneratingSummary(true);
     toast.loading("Synthesizing 2-minute AI cognitive summary...", { id: "concept-sum" });
     try {
+      const materialText = (typeof concept?.studyMaterial === "string" && concept.studyMaterial.trim().length > 0)
+        ? concept.studyMaterial.trim()
+        : undefined;
+
       const res = await fetchWithAuth("/learning/ai/summary", {
         method: "POST",
         body: JSON.stringify({
           conceptId,
-          studyMaterial: concept?.studyMaterial || ""
+          studyMaterial: materialText
         })
       });
       if (res.ok) {
@@ -145,6 +153,31 @@ export default function ConceptDetails({ params: paramsPromise }) {
 
   return (
     <>
+      {/* Active Process Loading Banner */}
+      {generatingQuiz && (
+        <div className="mb-4 p-4 rounded-xl bg-primary/10 border border-primary/30 flex items-center gap-3 shadow-xs animate-in fade-in duration-300">
+          <span className="material-symbols-outlined text-primary text-2xl animate-spin">
+            progress_activity
+          </span>
+          <div className="space-y-0.5">
+            <h4 className="text-sm font-bold text-on-surface">Generating 10 AI Active-Recall Questions...</h4>
+            <p className="text-xs text-on-surface-variant">Reviewing concept material to generate questions. You will be redirected to the quiz shortly.</p>
+          </div>
+        </div>
+      )}
+
+      {generatingSummary && (
+        <div className="mb-4 p-4 rounded-xl bg-primary-fixed/25 border border-primary/30 flex items-center gap-3 shadow-xs animate-in fade-in duration-300">
+          <span className="material-symbols-outlined text-primary text-2xl animate-spin">
+            progress_activity
+          </span>
+          <div className="space-y-0.5">
+            <h4 className="text-sm font-bold text-on-surface">Synthesizing 2-Minute Summary...</h4>
+            <p className="text-xs text-on-surface-variant">Extracting key cognitive triggers and high-yield concepts.</p>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-2 text-xs text-on-surface-variant mb-4">
         <Link href="/revision" className="hover:text-primary transition-colors flex items-center gap-1">
           <span className="material-symbols-outlined text-sm">arrow_back</span>
@@ -268,11 +301,11 @@ export default function ConceptDetails({ params: paramsPromise }) {
             {/* AI Summary / Hide Summary Button */}
             <button
               onClick={handleToggleSummary}
-              disabled={generatingSummary}
-              className="px-4 py-2.5 bg-surface-container-low hover:bg-surface-variant text-on-surface text-xs font-semibold rounded-xl transition-all flex items-center justify-center gap-1.5 border border-outline-variant/40"
+              disabled={generatingSummary || generatingQuiz}
+              className="px-4 py-2.5 bg-surface-container-low hover:bg-surface-variant text-on-surface text-xs font-semibold rounded-xl transition-all flex items-center justify-center gap-1.5 border border-outline-variant/40 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <span className="material-symbols-outlined text-sm text-primary">
-                {concept.aiSummary ? (showSummary ? "visibility_off" : "visibility") : "summarize"}
+              <span className={`material-symbols-outlined text-sm text-primary ${generatingSummary ? "animate-spin" : ""}`}>
+                {generatingSummary ? "progress_activity" : concept.aiSummary ? (showSummary ? "visibility_off" : "visibility") : "summarize"}
               </span>
               <span>
                 {generatingSummary
@@ -286,11 +319,11 @@ export default function ConceptDetails({ params: paramsPromise }) {
             {/* Generate Fresh Quiz Button */}
             <button
               onClick={handleGenerateFreshQuiz}
-              disabled={generatingQuiz}
-              className="px-4 py-2.5 bg-secondary-container text-on-secondary-container hover:bg-secondary hover:text-on-secondary text-xs font-bold rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+              disabled={generatingQuiz || generatingSummary}
+              className="px-4 py-2.5 bg-secondary-container text-on-secondary-container hover:bg-secondary hover:text-on-secondary text-xs font-bold rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <span className={`material-symbols-outlined text-sm ${generatingQuiz ? "animate-spin" : ""}`}>
-                {generatingQuiz ? "sync" : "auto_awesome"}
+                {generatingQuiz ? "progress_activity" : "auto_awesome"}
               </span>
               <span>{generatingQuiz ? "Generating Fresh Quiz..." : "Generate Fresh Quiz"}</span>
             </button>

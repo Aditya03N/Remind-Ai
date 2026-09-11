@@ -11,7 +11,12 @@ connectDB();
 
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.NODE_ENV === "production"
+    ? process.env.FRONTEND_URL || "https://remind-ai.vercel.app"
+    : "http://localhost:3000",
+  credentials: true,
+}));
 app.use(express.json());
 
 app.use("/api/users", authRoutes);
@@ -26,6 +31,11 @@ app.get("/", (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+// Allow sufficient time for AI operations
+server.setTimeout(180000);
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 66000;

@@ -12,17 +12,19 @@ export default function SubjectDetail() {
   const router = useRouter();
   const subjectId = params.id;
   const { user, loading: authLoading } = useAuth();
-  
+
   const [subject, setSubject] = useState(null);
   const [concepts, setConcepts] = useState([]);
   const [loading, setLoading] = useState(true);
-  
+
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
+  const [isCreatingConcept, setIsCreatingConcept] = useState(false);
 
   // AI, Material & Upload States
   const [activeMaterialConcept, setActiveMaterialConcept] = useState(null);
   const [materialText, setMaterialText] = useState("");
+  const [savingMaterial, setSavingMaterial] = useState(null);
   const [uploadingDoc, setUploadingDoc] = useState(null);
   const [deletingConceptId, setDeletingConceptId] = useState(null);
   const [generatingAI, setGeneratingAI] = useState(null);
@@ -46,18 +48,20 @@ export default function SubjectDetail() {
       const subRes = await fetchWithAuth("/learning/subjects");
       if (subRes.ok) {
         const subs = await subRes.json();
-        const found = subs.find(s => s._id === subjectId);
+        const found = subs.find((s) => s._id === subjectId);
         setSubject(found || { name: "Unknown Subject" });
       }
 
-      const conRes = await fetchWithAuth(`/learning/concepts/subject/${subjectId}`);
+      const conRes = await fetchWithAuth(
+        `/learning/concepts/subject/${subjectId}`,
+      );
       if (conRes.ok) {
         const data = await conRes.json();
         setConcepts(data);
-        
+
         // Cache pre-existing summaries
         const initialSummaries = {};
-        data.forEach(c => {
+        data.forEach((c) => {
           if (c.aiSummary) initialSummaries[c._id] = c.aiSummary;
         });
         setSummaries(initialSummaries);
@@ -78,28 +82,34 @@ export default function SubjectDetail() {
 
   const handleCreateConcept = async (e) => {
     e.preventDefault();
-    if (!newTitle.trim()) return;
-    
+    if (!newTitle.trim() || isCreatingConcept) return;
+
+    setIsCreatingConcept(true);
     try {
       const res = await fetchWithAuth("/learning/concepts", {
         method: "POST",
-        body: JSON.stringify({ 
-          name: newTitle, 
-          description: newDesc,
+        body: JSON.stringify({
+          name: newTitle.trim(),
+          description: newDesc.trim(),
           subjectId: subjectId,
-          difficulty: "Medium"
+          difficulty: "Medium",
         }),
       });
-      
+
       if (res.ok) {
         setNewTitle("");
         setNewDesc("");
-        loadData();
+        await loadData();
         toast.success("Concept added successfully!");
+      } else {
+        const err = await res.json();
+        toast.error(err.message || "Failed to create concept");
       }
     } catch (error) {
       toast.error("Failed to create concept");
       console.error("Failed to create concept", error);
+    } finally {
+      setIsCreatingConcept(false);
     }
   };
 
@@ -107,14 +117,18 @@ export default function SubjectDetail() {
     e.preventDefault();
     e.stopPropagation();
 
-    if (!window.confirm(`Are you sure you want to delete the concept "${conceptName}"?`)) {
+    if (
+      !window.confirm(
+        `Are you sure you want to delete the concept "${conceptName}"?`,
+      )
+    ) {
       return;
     }
 
     setDeletingConceptId(conceptId);
     try {
       const res = await fetchWithAuth(`/learning/concepts/${conceptId}`, {
-        method: "DELETE"
+        method: "DELETE",
       });
 
       if (res.ok) {
@@ -135,7 +149,9 @@ export default function SubjectDetail() {
     if (!file) return;
 
     if (file.size > 5 * 1024 * 1024) {
-      toast.error("Document size exceeds 5MB limit. Please upload a smaller file.");
+      toast.error(
+        "Document size exceeds 5MB limit. Please upload a smaller file.",
+      );
       return;
     }
 
@@ -143,21 +159,31 @@ export default function SubjectDetail() {
     formData.append("file", file);
 
     setUploadingDoc(conceptId);
-    toast.loading(`Extracting & analyzing ${file.name}...`, { id: "upload-doc" });
+    toast.loading(`Extracting & analyzing ${file.name}...`, {
+      id: "upload-doc",
+    });
 
     try {
-      const res = await fetchWithAuth(`/learning/concepts/${conceptId}/upload-material`, {
-        method: "POST",
-        body: formData
-      });
+      const res = await fetchWithAuth(
+        `/learning/concepts/${conceptId}/upload-material`,
+        {
+          method: "POST",
+          body: formData,
+        },
+      );
 
       if (res.ok) {
         const data = await res.json();
-        toast.success(`Parsed "${data.fileName}" (${Math.round(data.characterCount)} chars)! AI will use this material.`, { id: "upload-doc" });
+        toast.success(
+          `Parsed "${data.fileName}" (${Math.round(data.characterCount)} chars)! AI will use this material.`,
+          { id: "upload-doc" },
+        );
         await loadData();
       } else {
         const err = await res.json();
-        toast.error(err.message || "Failed to upload document", { id: "upload-doc" });
+        toast.error(err.message || "Failed to upload document", {
+          id: "upload-doc",
+        });
       }
     } catch (error) {
       toast.error("Network error during document upload", { id: "upload-doc" });
@@ -167,34 +193,82 @@ export default function SubjectDetail() {
   };
 
   const handleSaveMaterial = async (conceptId) => {
+    setSavingMaterial(conceptId);
     try {
-      const res = await fetchWithAuth(`/learning/concepts/${conceptId}/material`, {
-        method: "PUT",
-        body: JSON.stringify({ studyMaterial: materialText })
-      });
+      const res = await fetchWithAuth(
+        `/learning/concepts/${conceptId}/material`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ studyMaterial: materialText }),
+        },
+      );
       if (res.ok) {
         toast.success("Notes saved successfully!");
-        loadData();
+        await loadData();
+      } else {
+        const err = await res.json();
+        toast.error(err.message || "Failed to save material");
       }
     } catch (error) {
       toast.error("Failed to save material");
+    } finally {
+      setSavingMaterial(null);
+    }
+  };
+
+  const handleClearMaterial = async (conceptId) => {
+    try {
+      const res = await fetchWithAuth(
+        `/learning/concepts/${conceptId}/material`,
+        {
+          method: "DELETE",
+        },
+      );
+      if (res.ok) {
+        toast.success("Notes cleared successfully!");
+        setMaterialText("");
+        loadData();
+      } else {
+        toast.error("Failed to clear notes");
+      }
+    } catch (error) {
+      toast.error("Failed to clear notes");
     }
   };
 
   const handleGenerateAI = async (conceptId) => {
     setGeneratingAI(conceptId);
-    const conceptObj = concepts.find(c => c._id === conceptId);
+    const conceptObj = concepts.find((c) => c._id === conceptId);
     const hasDoc = !!conceptObj?.notesFileName;
-    
-    toast.loading(hasDoc ? `Generating 10 questions from "${conceptObj.notesFileName}"...` : "Generating 10 AI active-recall questions...", { id: "ai-gen" });
+
+    toast.loading(
+      hasDoc
+        ? `Generating 10 questions from "${conceptObj.notesFileName}"...`
+        : "Generating 10 AI active-recall questions...",
+      { id: "ai-gen" },
+    );
     try {
+      const materialToSend =
+        activeMaterialConcept === conceptId &&
+        materialText &&
+        materialText.trim().length > 0
+          ? materialText.trim()
+          : conceptObj?.studyMaterial || undefined;
+
       const res = await fetchWithAuth("/learning/ai/generate", {
         method: "POST",
-        body: JSON.stringify({ conceptId, count: 10, studyMaterial: materialText || undefined })
+        body: JSON.stringify({
+          conceptId,
+          count: 10,
+          studyMaterial: materialToSend,
+        }),
       });
       if (res.ok) {
         const data = await res.json();
-        toast.success(`Generated ${data.questionsCount || 10} questions! Ready to quiz.`, { id: "ai-gen" });
+        toast.success(
+          `Generated ${data.questionsCount || 10} questions! Ready to quiz.`,
+          { id: "ai-gen" },
+        );
         await loadData();
         router.push(`/retention-check/${conceptId}`);
       } else {
@@ -203,35 +277,56 @@ export default function SubjectDetail() {
       }
     } catch (error) {
       toast.error("AI Generation failed", { id: "ai-gen" });
+    } finally {
+      setGeneratingAI(null);
     }
-    setGeneratingAI(null);
   };
 
   const handleGenerateSummary = async (conceptId) => {
     setGeneratingSummary(conceptId);
-    const conceptObj = concepts.find(c => c._id === conceptId);
+    const conceptObj = concepts.find((c) => c._id === conceptId);
     const hasDoc = !!conceptObj?.notesFileName;
 
-    toast.loading(hasDoc ? `Summarizing "${conceptObj.notesFileName}"...` : "Creating high-yield pre-quiz summary...", { id: "ai-sum" });
+    toast.loading(
+      hasDoc
+        ? `Summarizing "${conceptObj.notesFileName}"...`
+        : "Creating high-yield pre-quiz summary...",
+      { id: "ai-sum" },
+    );
     try {
+      const materialToSend =
+        activeMaterialConcept === conceptId &&
+        materialText &&
+        materialText.trim().length > 0
+          ? materialText.trim()
+          : conceptObj?.studyMaterial || undefined;
+
       const res = await fetchWithAuth("/learning/ai/summary", {
         method: "POST",
-        body: JSON.stringify({ conceptId, studyMaterial: materialText || undefined })
+        body: JSON.stringify({
+          conceptId,
+          studyMaterial: materialToSend,
+        }),
       });
       if (res.ok) {
         const data = await res.json();
-        setSummaries(prev => ({ ...prev, [conceptId]: data.summary }));
-        setModalConcept(data.concept || concepts.find(c => c._id === conceptId));
+        setSummaries((prev) => ({ ...prev, [conceptId]: data.summary }));
+        setModalConcept(
+          data.concept || concepts.find((c) => c._id === conceptId),
+        );
         toast.success("Topic summary ready!", { id: "ai-sum" });
-        loadData();
+        await loadData();
       } else {
         const err = await res.json();
-        toast.error(err.message || "Failed to generate summary", { id: "ai-sum" });
+        toast.error(err.message || "Failed to generate summary", {
+          id: "ai-sum",
+        });
       }
     } catch (error) {
       toast.error("Failed to generate summary", { id: "ai-sum" });
+    } finally {
+      setGeneratingSummary(null);
     }
-    setGeneratingSummary(null);
   };
 
   const openSummaryModal = (con) => {
@@ -241,96 +336,201 @@ export default function SubjectDetail() {
     }
   };
 
-  if (authLoading || loading) return (
-    <div className="space-y-8 animate-pulse">
-      <div className="h-10 bg-surface-container-low rounded-lg w-1/3"></div>
-      <div className="h-24 bg-surface-container-low rounded-xl w-full"></div>
-      <div className="grid grid-cols-1 gap-4">
-        <div className="h-48 bg-surface-container-low rounded-xl w-full"></div>
+  if (authLoading || loading)
+    return (
+      <div className="space-y-8 animate-pulse">
+        <div className="h-10 bg-surface-container-low rounded-lg w-1/3"></div>
+        <div className="h-24 bg-surface-container-low rounded-xl w-full"></div>
+        <div className="grid grid-cols-1 gap-4">
+          <div className="h-48 bg-surface-container-low rounded-xl w-full"></div>
+        </div>
       </div>
-    </div>
-  );
+    );
   if (!user) return null;
 
   return (
     <div className="space-y-8">
+      {/* Active Process Loading Banner */}
+      {generatingAI && (
+        <div className="p-4 rounded-xl bg-primary/10 border border-primary/30 flex items-center gap-3 shadow-xs animate-in fade-in duration-300">
+          <span className="material-symbols-outlined text-primary text-2xl animate-spin">
+            progress_activity
+          </span>
+          <div className="space-y-0.5">
+            <h4 className="text-sm font-bold text-on-surface">
+              Generating 10 AI Active-Recall Questions...
+            </h4>
+            <p className="text-xs text-on-surface-variant">
+              Reviewing notes and generating active-recall questions with
+              explanations. You will be redirected momentarily.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {uploadingDoc && (
+        <div className="p-4 rounded-xl bg-secondary/10 border border-secondary/30 flex items-center gap-3 shadow-xs animate-in fade-in duration-300">
+          <span className="material-symbols-outlined text-secondary text-2xl animate-spin">
+            progress_activity
+          </span>
+          <div className="space-y-0.5">
+            <h4 className="text-sm font-bold text-on-surface">
+              Parsing & Extracting Document Notes...
+            </h4>
+            <p className="text-xs text-on-surface-variant">
+              Uploading Word/PDF file and extracting readable study content for
+              AI generation.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {generatingSummary && (
+        <div className="p-4 rounded-xl bg-primary-fixed/25 border border-primary/30 flex items-center gap-3 shadow-xs animate-in fade-in duration-300">
+          <span className="material-symbols-outlined text-primary text-2xl animate-spin">
+            progress_activity
+          </span>
+          <div className="space-y-0.5">
+            <h4 className="text-sm font-bold text-on-surface">
+              Synthesizing High-Yield Summary...
+            </h4>
+            <p className="text-xs text-on-surface-variant">
+              Generating a 2-minute quick review summary with core definitions
+              and exam cues.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-4">
-        <Link href="/subjects" className="p-2 bg-surface-container-low hover:bg-surface-variant rounded-full text-on-surface-variant transition-colors">
+        <Link
+          href="/subjects"
+          className="p-2 bg-surface-container-low hover:bg-surface-variant rounded-full text-on-surface-variant transition-colors"
+        >
           <span className="material-symbols-outlined text-sm">arrow_back</span>
         </Link>
         <div>
-          <h2 className="text-2xl font-bold text-on-surface" style={{fontFamily: "var(--font-headline-md)"}}>
+          <h2
+            className="text-2xl font-bold text-on-surface"
+            style={{ fontFamily: "var(--font-headline-md)" }}
+          >
             {subject?.name} - Concepts
           </h2>
-          <p className="text-sm text-on-surface-variant">Upload notes/PDFs, generate tailored active-recall quizzes, and test your memory</p>
+          <p className="text-sm text-on-surface-variant">
+            Upload notes, Word documents (.docx/.doc), PDFs, generate tailored
+            active-recall quizzes, and test your memory
+          </p>
         </div>
       </div>
 
       {/* Add Concept Form */}
-      <form onSubmit={handleCreateConcept} className="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/40 shadow-sm flex flex-col sm:flex-row gap-4 items-start sm:items-end">
+      <form
+        onSubmit={handleCreateConcept}
+        className="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/40 shadow-sm flex flex-col sm:flex-row gap-4 items-start sm:items-end"
+      >
         <div className="flex-1 w-full">
-          <label className="block text-xs font-medium text-on-surface mb-1">Concept Title</label>
-          <input 
-            type="text" 
+          <label className="block text-xs font-medium text-on-surface mb-1">
+            Concept Title
+          </label>
+          <input
+            type="text"
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             className="w-full bg-surface-container-low border border-outline-variant rounded-xl px-4 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
             placeholder="e.g. Dynamic Programming"
             required
+            disabled={isCreatingConcept}
           />
         </div>
         <div className="flex-1 w-full">
-          <label className="block text-xs font-medium text-on-surface mb-1">Key Details / Topic Scope (Optional)</label>
-          <input 
-            type="text" 
+          <label className="block text-xs font-medium text-on-surface mb-1">
+            Key Details / Topic Scope (Optional)
+          </label>
+          <input
+            type="text"
             value={newDesc}
             onChange={(e) => setNewDesc(e.target.value)}
             className="w-full bg-surface-container-low border border-outline-variant rounded-xl px-4 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
             placeholder="e.g. Memoization, Tabulation, Knapsack variations"
+            disabled={isCreatingConcept}
           />
         </div>
-        <button type="submit" className="px-6 py-2 bg-primary hover:bg-primary-container text-on-primary text-sm font-medium rounded-xl shadow-md transition-all whitespace-nowrap h-[38px]">
-          + Add Concept
+        <button
+          type="submit"
+          disabled={isCreatingConcept}
+          className="px-6 py-2 bg-primary hover:bg-primary-container text-on-primary text-sm font-medium rounded-xl shadow-md transition-all whitespace-nowrap h-[38px] flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isCreatingConcept ? (
+            <>
+              <span className="material-symbols-outlined text-sm animate-spin">
+                progress_activity
+              </span>
+              <span>Adding...</span>
+            </>
+          ) : (
+            <span>+ Add Concept</span>
+          )}
         </button>
       </form>
 
       {/* Concepts List */}
       <div className="grid grid-cols-1 gap-6">
         {concepts.map((con) => (
-          <div key={con._id} className="bg-surface-container-lowest p-5 rounded-xl border border-outline-variant/40 shadow-sm flex flex-col gap-4 transition-all relative">
-            
+          <div
+            key={con._id}
+            className="bg-surface-container-lowest p-5 rounded-xl border border-outline-variant/40 shadow-sm flex flex-col gap-4 transition-all relative"
+          >
             <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 mb-1.5">
                   <div className="w-8 h-8 rounded-lg bg-primary-container/20 flex items-center justify-center text-primary">
-                    <span className="material-symbols-outlined text-sm">memory</span>
+                    <span className="material-symbols-outlined text-sm">
+                      memory
+                    </span>
                   </div>
-                  <h4 className="text-base font-bold text-on-surface">{con.name}</h4>
+                  <h4 className="text-base font-bold text-on-surface">
+                    {con.name}
+                  </h4>
                 </div>
-                {con.description && <p className="text-sm text-on-surface-variant pl-10">{con.description}</p>}
-                
+                {con.description && (
+                  <p className="text-sm text-on-surface-variant pl-10">
+                    {con.description}
+                  </p>
+                )}
+
                 {/* Status Badges & Uploaded Doc Indicator */}
                 <div className="flex items-center gap-2 pl-10 mt-2 flex-wrap">
                   {con.notesFileName ? (
                     <span className="text-xs px-2.5 py-0.5 bg-secondary-fixed/50 text-on-secondary-fixed font-semibold rounded-full flex items-center gap-1 border border-secondary/30">
-                      <span className="material-symbols-outlined text-xs">attach_file</span>
+                      <span className="material-symbols-outlined text-xs">
+                        attach_file
+                      </span>
                       <span>Notes: {con.notesFileName}</span>
                     </span>
                   ) : null}
 
                   {con.quizCount > 0 ? (
                     <span className="text-xs px-2.5 py-0.5 bg-emerald-500/10 text-emerald-700 font-semibold rounded-full flex items-center gap-1 border border-emerald-500/20">
-                      <span className="material-symbols-outlined text-xs">quiz</span> {con.quizCount} Questions Available
+                      <span className="material-symbols-outlined text-xs">
+                        quiz
+                      </span>{" "}
+                      {con.quizCount} Questions Available
                     </span>
                   ) : (
                     <span className="text-xs px-2.5 py-0.5 bg-amber-500/10 text-amber-700 font-medium rounded-full flex items-center gap-1 border border-amber-500/20">
-                      <span className="material-symbols-outlined text-xs">auto_awesome</span> Ready for AI Generation
+                      <span className="material-symbols-outlined text-xs">
+                        auto_awesome
+                      </span>{" "}
+                      Ready for AI Generation
                     </span>
                   )}
 
                   {summaries[con._id] || con.aiSummary ? (
                     <span className="text-xs px-2.5 py-0.5 bg-primary/10 text-primary font-medium rounded-full flex items-center gap-1 border border-primary/20">
-                      <span className="material-symbols-outlined text-xs">lightbulb</span> Summary Ready
+                      <span className="material-symbols-outlined text-xs">
+                        lightbulb
+                      </span>{" "}
+                      Summary Ready
                     </span>
                   ) : null}
                 </div>
@@ -338,15 +538,16 @@ export default function SubjectDetail() {
 
               {/* Action Buttons */}
               <div className="flex items-center gap-2 md:pl-0 pl-10 flex-wrap">
-                {/* Hidden File Input for PDF/TXT/MD Upload */}
-                <input 
+                {/* Hidden File Input for PDF/TXT/MD/DOCX/ALL Upload */}
+                <input
                   type="file"
-                  ref={el => fileInputRefs.current[con._id] = el}
-                  accept=".pdf,.txt,.md,.doc,.docx"
+                  ref={(el) => (fileInputRefs.current[con._id] = el)}
+                  accept=".docx,.doc,.pdf,.txt,.md,.rtf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/pdf,text/*"
                   className="hidden"
                   onChange={(e) => {
                     if (e.target.files?.[0]) {
                       handleFileUpload(con._id, e.target.files[0]);
+                      e.target.value = "";
                     }
                   }}
                 />
@@ -360,17 +561,21 @@ export default function SubjectDetail() {
                       ? "bg-secondary-fixed/30 border-secondary/40 text-on-secondary-fixed hover:bg-secondary-fixed/50"
                       : "bg-surface-container-low border-outline-variant text-on-surface hover:bg-surface-variant hover:border-primary"
                   }`}
-                  title="Upload PDF, TXT, or MD notes under 5MB to customize questions"
+                  title="Upload Word (.docx / .doc), PDF, TXT, or MD notes under 5MB to customize questions"
                 >
                   <span className="material-symbols-outlined text-sm">
-                    {uploadingDoc === con._id ? "progress_activity" : con.notesFileName ? "file_present" : "upload_file"}
+                    {uploadingDoc === con._id
+                      ? "progress_activity"
+                      : con.notesFileName
+                        ? "file_present"
+                        : "upload_file"}
                   </span>
                   <span>
-                    {uploadingDoc === con._id 
-                      ? "Uploading..." 
-                      : con.notesFileName 
-                      ? "Replace Notes" 
-                      : "Upload Notes"}
+                    {uploadingDoc === con._id
+                      ? "Uploading..."
+                      : con.notesFileName
+                        ? "Replace Document"
+                        : "Upload Word / Notes"}
                   </span>
                 </button>
 
@@ -379,33 +584,73 @@ export default function SubjectDetail() {
                   onClick={() => openSummaryModal(con)}
                   className="px-3.5 py-1.5 text-xs bg-secondary-fixed text-on-secondary-fixed font-semibold rounded-lg hover:brightness-95 transition-all flex items-center gap-1.5 shadow-xs"
                 >
-                  <span className="material-symbols-outlined text-sm">summarize</span>
-                  <span>{summaries[con._id] || con.aiSummary ? "View Summary" : "Generate Summary"}</span>
+                  <span className="material-symbols-outlined text-sm">
+                    summarize
+                  </span>
+                  <span>
+                    {summaries[con._id] || con.aiSummary
+                      ? "View Summary"
+                      : "Generate Summary"}
+                  </span>
                 </button>
 
-                {/* 3. Give Quiz / Generate & Start Quiz Button */}
-                <Link 
+                {/* 3. Give Quiz / Start Quiz Button */}
+                <Link
                   href={`/retention-check/${con._id}`}
-                  className="px-4 py-1.5 text-xs bg-primary text-on-primary font-bold rounded-lg hover:bg-primary-container transition-all flex items-center gap-1.5 shadow-sm"
+                  className="px-3.5 py-1.5 text-xs bg-primary text-on-primary font-bold rounded-lg hover:bg-primary-container transition-all flex items-center gap-1.5 shadow-sm"
                 >
-                  <span className="material-symbols-outlined text-sm" style={{fontVariationSettings: "'FILL' 1"}}>play_arrow</span>
-                  <span>{con.quizCount > 0 ? `Give Quiz (${con.quizCount} Qs)` : "Generate & Start Quiz"}</span>
+                  <span
+                    className="material-symbols-outlined text-sm"
+                    style={{ fontVariationSettings: "'FILL' 1" }}
+                  >
+                    play_arrow
+                  </span>
+                  <span>
+                    {con.quizCount > 0
+                      ? `Give Quiz (${con.quizCount} Qs)`
+                      : "Start Quiz"}
+                  </span>
                 </Link>
 
+                {/* 3.1 Generate Fresh Quiz Button */}
+                {/* <button
+                  onClick={() => handleGenerateAI(con._id)}
+                  disabled={generatingAI === con._id || generatingAI !== null}
+                  className="px-3 py-1.5 text-xs bg-secondary-container text-on-secondary-container hover:bg-secondary hover:text-on-secondary font-semibold rounded-lg transition-all flex items-center gap-1.5 shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={con.quizCount > 0 ? "Generate a brand new set of 10 AI active-recall questions" : "Generate 10 AI questions for this topic"}
+                >
+                  <span
+                    className={`material-symbols-outlined text-sm ${generatingAI === con._id ? "animate-spin" : ""}`}
+                  >
+                    {generatingAI === con._id ? "progress_activity" : "auto_awesome"}
+                  </span>
+                  <span>
+                    {generatingAI === con._id
+                      ? "Generating..."
+                      : con.quizCount > 0
+                      ? "Fresh Quiz"
+                      : "Generate Quiz"}
+                  </span>
+                </button> */}
+
                 {/* 4. Manual Notes Editor Toggle */}
-                <button 
+                <button
                   onClick={() => {
-                    setActiveMaterialConcept(activeMaterialConcept === con._id ? null : con._id);
+                    setActiveMaterialConcept(
+                      activeMaterialConcept === con._id ? null : con._id,
+                    );
                     setMaterialText(con.studyMaterial || "");
                   }}
                   className={`p-1.5 text-xs rounded-lg transition-all border ${
-                    activeMaterialConcept === con._id 
+                    activeMaterialConcept === con._id
                       ? "bg-surface-container-high border-primary text-primary"
                       : "bg-surface-container-low border-outline-variant text-on-surface-variant hover:text-on-surface"
                   }`}
                   title="View/Edit study notes"
                 >
-                  <span className="material-symbols-outlined text-sm">edit_note</span>
+                  <span className="material-symbols-outlined text-sm">
+                    edit_note
+                  </span>
                 </button>
 
                 {/* 5. Delete Concept Button */}
@@ -416,20 +661,25 @@ export default function SubjectDetail() {
                   title="Delete Concept"
                 >
                   <span className="material-symbols-outlined text-sm">
-                    {deletingConceptId === con._id ? "progress_activity" : "delete"}
+                    {deletingConceptId === con._id
+                      ? "progress_activity"
+                      : "delete"}
                   </span>
                 </button>
               </div>
             </div>
-            
+
             {/* AI Notes Drawer & Document Preview */}
             {activeMaterialConcept === con._id && (
               <div className="mt-2 pl-4 md:pl-8 border-l-2 border-primary/30 ml-2 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="bg-surface-container-low p-5 rounded-xl border border-outline-variant/50 space-y-3">
                   <div className="flex items-center justify-between">
                     <h5 className="text-xs font-bold text-on-surface flex items-center gap-2">
-                      <span className="material-symbols-outlined text-sm text-primary">description</span> 
-                      Study Material &amp; Document Text ({con.notesFileName || "Custom Notes"})
+                      <span className="material-symbols-outlined text-sm text-primary">
+                        description
+                      </span>
+                      Study Material &amp; Document Text (
+                      {con.notesFileName || "Custom Notes"})
                     </h5>
                     {con.studyMaterial && (
                       <span className="text-xs text-on-surface-variant">
@@ -437,62 +687,128 @@ export default function SubjectDetail() {
                       </span>
                     )}
                   </div>
+
+                  {materialText &&
+                    (materialText.includes("login.live.com") ||
+                      materialText.includes("Microsoft Corporation") ||
+                      materialText.includes("ServerData =")) && (
+                      <div className="p-3 bg-error-container/40 border border-error/30 rounded-lg text-xs text-error flex items-start gap-2">
+                        <span className="material-symbols-outlined text-sm shrink-0">
+                          warning
+                        </span>
+                        <div className="flex-1">
+                          <strong>Corrupted Notes Detected:</strong> This notes
+                          section contains Microsoft OneDrive login HTML from an
+                          unauthenticated web download. Click{" "}
+                          <strong>Clear Notes</strong> below and upload your
+                          real PDF or Word file.
+                        </div>
+                      </div>
+                    )}
+
                   <p className="text-xs text-on-surface-variant">
-                    {con.notesFileName 
+                    {con.notesFileName
                       ? `Extracted text from "${con.notesFileName}". You can edit or append text before generating AI questions.`
-                      : "Type, paste notes, or use the 'Upload Notes' button to attach PDFs/docs for AI analysis."}
+                      : "Type, paste notes, or use the 'Upload Word / Notes' button to attach Word (.docx/.doc), PDF, or text files for AI analysis."}
                   </p>
-                  <textarea 
+                  <textarea
                     value={materialText}
                     onChange={(e) => setMaterialText(e.target.value)}
                     placeholder="Paste notes, definitions, formulas, or syllabus content here..."
                     className="w-full h-28 bg-surface-container border border-outline-variant rounded-lg p-3 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none font-mono"
                   ></textarea>
-                  
+
                   <div className="flex flex-wrap items-center gap-2">
-                    <button 
-                      onClick={() => handleSaveMaterial(con._id)} 
-                      className="px-3.5 py-1.5 text-xs bg-surface-container-highest hover:bg-surface-variant text-on-surface rounded-md font-medium border border-outline-variant transition-colors"
+                    <button
+                      onClick={() => handleSaveMaterial(con._id)}
+                      disabled={savingMaterial === con._id}
+                      className="px-3.5 py-1.5 text-xs bg-surface-container-highest hover:bg-surface-variant text-on-surface rounded-md font-medium border border-outline-variant transition-colors flex items-center gap-1.5 disabled:opacity-50"
                     >
-                      Save Notes
+                      <span
+                        className={`material-symbols-outlined text-xs ${savingMaterial === con._id ? "animate-spin" : ""}`}
+                      >
+                        {savingMaterial === con._id
+                          ? "progress_activity"
+                          : "save"}
+                      </span>
+                      <span>
+                        {savingMaterial === con._id
+                          ? "Saving..."
+                          : "Save Notes"}
+                      </span>
                     </button>
 
-                    <button 
-                      onClick={() => handleGenerateSummary(con._id)} 
+                    <button
+                      onClick={() => handleClearMaterial(con._id)}
+                      className="px-3 py-1.5 text-xs bg-error/10 hover:bg-error/20 text-error rounded-md font-medium border border-error/30 transition-colors flex items-center gap-1"
+                      title="Clear attached notes"
+                    >
+                      <span className="material-symbols-outlined text-xs">
+                        delete
+                      </span>
+                      Clear Notes
+                    </button>
+
+                    <button
+                      onClick={() => handleGenerateSummary(con._id)}
                       disabled={generatingSummary === con._id}
                       className="px-3.5 py-1.5 text-xs bg-secondary-fixed text-on-secondary-fixed rounded-md font-semibold hover:brightness-95 transition-all flex items-center gap-1.5 disabled:opacity-50"
                     >
                       {generatingSummary === con._id ? (
-                        <><span className="material-symbols-outlined text-sm animate-spin">progress_activity</span> Generating Summary...</>
+                        <>
+                          <span className="material-symbols-outlined text-sm animate-spin">
+                            progress_activity
+                          </span>{" "}
+                          Generating Summary...
+                        </>
                       ) : (
-                        <><span className="material-symbols-outlined text-sm">summarize</span> Summarize Notes</>
+                        <>
+                          <span className="material-symbols-outlined text-sm">
+                            summarize
+                          </span>{" "}
+                          Summarize Notes
+                        </>
                       )}
                     </button>
 
-                    <button 
-                      onClick={() => handleGenerateAI(con._id)} 
+                    <button
+                      onClick={() => handleGenerateAI(con._id)}
                       disabled={generatingAI === con._id}
                       className="px-4 py-1.5 text-xs bg-primary text-on-primary rounded-md font-bold hover:bg-primary/90 transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50"
                     >
                       {generatingAI === con._id ? (
-                        <><span className="material-symbols-outlined text-sm animate-spin">progress_activity</span> Generating 10 Questions...</>
+                        <>
+                          <span className="material-symbols-outlined text-sm animate-spin">
+                            progress_activity
+                          </span>{" "}
+                          Generating 10 Questions...
+                        </>
                       ) : (
-                        <><span className="material-symbols-outlined text-sm">auto_awesome</span> Generate 10 Questions From Notes</>
+                        <>
+                          <span className="material-symbols-outlined text-sm">
+                            auto_awesome
+                          </span>{" "}
+                          Generate 10 Questions From Notes
+                        </>
                       )}
                     </button>
                   </div>
                 </div>
               </div>
             )}
-
           </div>
         ))}
 
         {concepts.length === 0 && (
           <div className="col-span-full py-12 text-center bg-surface-container-low rounded-xl border border-dashed border-outline-variant">
-            <span className="material-symbols-outlined text-4xl text-on-surface-variant mb-2">psychology</span>
+            <span className="material-symbols-outlined text-4xl text-on-surface-variant mb-2">
+              psychology
+            </span>
             <p className="text-on-surface font-medium">No concepts yet</p>
-            <p className="text-sm text-on-surface-variant">Add your first concept above to start uploading notes and generating AI quizzes.</p>
+            <p className="text-sm text-on-surface-variant">
+              Add your first concept above to start uploading notes and
+              generating AI quizzes.
+            </p>
           </div>
         )}
       </div>
@@ -504,16 +820,22 @@ export default function SubjectDetail() {
             <div className="p-5 bg-surface-container-low border-b border-outline-variant/40 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-primary-container/20 flex items-center justify-center text-primary">
-                  <span className="material-symbols-outlined text-sm">lightbulb</span>
+                  <span className="material-symbols-outlined text-sm">
+                    lightbulb
+                  </span>
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-on-surface">{modalConcept.name}</h3>
+                  <h3 className="text-base font-bold text-on-surface">
+                    {modalConcept.name}
+                  </h3>
                   <p className="text-xs text-on-surface-variant">
-                    {modalConcept.notesFileName ? `Summary synthesized from "${modalConcept.notesFileName}"` : "High-Yield AI Topic Summary"}
+                    {modalConcept.notesFileName
+                      ? `Summary synthesized from "${modalConcept.notesFileName}"`
+                      : "High-Yield AI Topic Summary"}
                   </p>
                 </div>
               </div>
-              <button 
+              <button
                 onClick={() => setModalConcept(null)}
                 className="w-8 h-8 rounded-full hover:bg-surface-variant text-on-surface-variant flex items-center justify-center transition-colors"
               >
@@ -525,8 +847,13 @@ export default function SubjectDetail() {
               {generatingSummary === modalConcept._id ? (
                 <div className="py-12 flex flex-col items-center justify-center gap-3 text-center">
                   <div className="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin"></div>
-                  <p className="text-sm font-semibold text-on-surface">Analyzing notes with Google Gemini...</p>
-                  <p className="text-xs text-on-surface-variant">Extracting core principles, definitions, and active recall cues.</p>
+                  <p className="text-sm font-semibold text-on-surface">
+                    Analyzing notes with Google Gemini...
+                  </p>
+                  <p className="text-xs text-on-surface-variant">
+                    Extracting core principles, definitions, and active recall
+                    cues.
+                  </p>
                 </div>
               ) : summaries[modalConcept._id] || modalConcept.aiSummary ? (
                 <div className="text-xs md:text-sm text-on-surface leading-relaxed whitespace-pre-wrap bg-surface-container-low p-4 rounded-xl border border-outline-variant/30 font-sans">
@@ -534,12 +861,26 @@ export default function SubjectDetail() {
                 </div>
               ) : (
                 <div className="text-center py-8 space-y-3">
-                  <p className="text-xs text-on-surface-variant">No summary generated yet for this concept.</p>
+                  <p className="text-xs text-on-surface-variant">
+                    No summary generated yet for this concept.
+                  </p>
                   <button
                     onClick={() => handleGenerateSummary(modalConcept._id)}
-                    className="px-4 py-2 bg-primary text-on-primary rounded-xl text-xs font-semibold shadow-sm"
+                    disabled={generatingSummary === modalConcept._id}
+                    className="px-4 py-2 bg-primary text-on-primary rounded-xl text-xs font-semibold shadow-sm flex items-center gap-1.5 mx-auto disabled:opacity-50"
                   >
-                    Generate AI Summary Now
+                    <span
+                      className={`material-symbols-outlined text-sm ${generatingSummary === modalConcept._id ? "animate-spin" : ""}`}
+                    >
+                      {generatingSummary === modalConcept._id
+                        ? "progress_activity"
+                        : "auto_awesome"}
+                    </span>
+                    <span>
+                      {generatingSummary === modalConcept._id
+                        ? "Generating Summary..."
+                        : "Generate AI Summary Now"}
+                    </span>
                   </button>
                 </div>
               )}
@@ -549,10 +890,20 @@ export default function SubjectDetail() {
               <button
                 onClick={() => handleGenerateSummary(modalConcept._id)}
                 disabled={generatingSummary === modalConcept._id}
-                className="px-3.5 py-2 text-xs bg-surface-container-highest hover:bg-surface-variant text-on-surface rounded-lg font-medium border border-outline-variant transition-colors flex items-center gap-1.5"
+                className="px-3.5 py-2 text-xs bg-surface-container-highest hover:bg-surface-variant text-on-surface rounded-lg font-medium border border-outline-variant transition-colors flex items-center gap-1.5 disabled:opacity-50"
               >
-                <span className="material-symbols-outlined text-sm">refresh</span>
-                <span>Regenerate Summary</span>
+                <span
+                  className={`material-symbols-outlined text-sm ${generatingSummary === modalConcept._id ? "animate-spin" : ""}`}
+                >
+                  {generatingSummary === modalConcept._id
+                    ? "progress_activity"
+                    : "refresh"}
+                </span>
+                <span>
+                  {generatingSummary === modalConcept._id
+                    ? "Regenerating..."
+                    : "Regenerate Summary"}
+                </span>
               </button>
 
               <Link
@@ -560,7 +911,9 @@ export default function SubjectDetail() {
                 onClick={() => setModalConcept(null)}
                 className="px-5 py-2 text-xs bg-primary hover:bg-primary-container text-on-primary font-bold rounded-lg transition-all flex items-center gap-1.5 shadow-sm"
               >
-                <span className="material-symbols-outlined text-sm">play_arrow</span>
+                <span className="material-symbols-outlined text-sm">
+                  play_arrow
+                </span>
                 <span>Start Quiz ({modalConcept.quizCount || 10} Qs)</span>
               </Link>
             </div>

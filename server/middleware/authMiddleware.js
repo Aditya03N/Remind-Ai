@@ -1,6 +1,12 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error("FATAL: JWT_SECRET environment variable is not set. Server cannot start securely.");
+  process.exit(1);
+}
+
 const protect = async (req, res, next) => {
   let token;
 
@@ -12,7 +18,7 @@ const protect = async (req, res, next) => {
       token = req.headers.authorization.split(" ")[1];
 
       // Decodes token id
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || "fallback_secret");
+      const decoded = jwt.verify(token, JWT_SECRET);
 
       req.user = await User.findById(decoded.id).select("-password");
       
