@@ -3,15 +3,11 @@ const { GoogleGenerativeAI, SchemaType } = require("@google/generative-ai");
 // Initialize Gemini API
 const genAI = new GoogleGenerativeAI(process.env.AI_API_KEY || "");
 
-// Prioritized model chain: gemini-3.5-flash is fast (~14s) and stable.
-// If any model experiences high demand (503) or rate limits (429), it automatically fails over.
+// Prioritized model chain: gemini-3.5-flash is the fastest and most capable.
 const CANDIDATE_MODELS = [
   process.env.AI_MODEL,
   "gemini-3.5-flash",
-  "gemini-3.7-flash",
-  "gemini-3.8-flash",
-  "gemini-3.6-flash",
-  "gemini-flash-latest"
+  "gemini-2.5-flash",
 ].filter(Boolean);
 
 const UNIQUE_MODELS = [...new Set(CANDIDATE_MODELS)];
@@ -45,7 +41,7 @@ async function generateWithFallback(prompt, generationConfig = {}) {
 
         if ((isOverloaded || isRateLimited) && attempt === 1) {
           // Wait 1.5 seconds and retry on same model once before failing over
-          await new Promise((r) => setTimeout(r, 1500));
+          await new Promise((r) => setTimeout(r, 800));
           continue;
         }
 
@@ -90,64 +86,39 @@ const generateQuestions = async (topicName, studyMaterial, count = 10, existingQ
 
   const cleanMaterial = (studyMaterial || "").trim().slice(0, 25000);
   const hasMaterial = !!cleanMaterial;
-  const materialContext = hasMaterial
-    ? `CRITICAL MANDATORY INSTRUCTION - STRICT SOURCE GROUNDING:
-You MUST base ALL questions, answer options, and explanations STRICTLY AND EXCLUSIVELY on the provided study material below.
-Do NOT invent facts, use outside textbook knowledge, or ask about topics not present in this text.
-Analyze the provided material thoroughly (specific terms, definitions, equations, steps, data points, and examples):
-
-================ UPLOADED NOTES / MATERIAL START ================
-${cleanMaterial}
-================ UPLOADED NOTES / MATERIAL END ================`
-    : `Use your general scientific/academic knowledge about the topic: "${topicName}".`;
 
   const avoidContext = existingQuestions.length > 0 
-    ? `Avoid asking questions very similar to these existing ones:\n${existingQuestions.map(q => q.questionText).join("\n")}\n\n` 
+    ? `\nAvoid repeating these questions:\n${existingQuestions.map(q => q.questionText).join("\n")}\n` 
     : "";
 
-  const prompt = hasMaterial 
-    ? `You are an expert examiner creating an active-recall assessment based STRICTLY on the student's uploaded notes for: "${topicName}".
+  // When no notes: use a short, direct prompt for fast generation
+  // When notes provided: use the full detailed prompt for accuracy
+  let prompt;
+  if (hasMaterial) {
+    prompt = `You are an expert examiner. Generate exactly ${count} MCQs based STRICTLY on the uploaded notes for "${topicName}".
 
-${materialContext}
+STRICT SOURCE GROUNDING — base ALL questions exclusively on this material:
 
+${cleanMaterial}
 ${avoidContext}
-
-Generate exactly ${count} multiple choice questions.
-STRICT RULES:
-1. Every question must directly test concepts, facts, formulas, or mechanisms explicitly explained in the uploaded notes above.
-2. Each question MUST have exactly 4 options.
-3. The correctOptionIndex MUST be 0, 1, 2, or 3.
-4. The explanation MUST reference or cite the specific point from the notes that confirms the answer.
-5. Provide a good distribution of Easy, Medium, and Hard conceptual questions directly reflecting the document content.`
-    : `You are an expert tutor creating an active-recall quiz for a student on the topic: "${topicName}".
-
-${materialContext}
-
-${avoidContext}
-
-Generate exactly ${count} distinct, high-quality multiple choice questions.
-Each question MUST have exactly 4 options.
-The correctOptionIndex MUST be 0, 1, 2, or 3.
-Ensure the questions test conceptual understanding, edge cases, and principles rather than just rote memorization.`;
+Rules: 4 options each, correctOptionIndex 0-3, explanation must cite the notes, mix Easy/Medium/Hard.`;
+  } else {
+    prompt = `Generate ${count} MCQs on "${topicName}". 4 options each, correctOptionIndex 0-3, brief explanation, mix Easy/Medium/Hard.${avoidContext}`;
+  }
 
   const generationConfig = {
-    temperature: 0.7,
+    temperature: hasMaterial ? 0.5 : 0.8,
     responseMimeType: "application/json",
     responseSchema: {
       type: SchemaType.ARRAY,
-      description: "A list of multiple choice questions.",
       items: {
         type: SchemaType.OBJECT,
         properties: {
-          questionText: { type: SchemaType.STRING, description: "The multiple choice question text." },
-          options: { 
-            type: SchemaType.ARRAY, 
-            items: { type: SchemaType.STRING },
-            description: "Exactly 4 options for the multiple choice question."
-          },
-          correctOptionIndex: { type: SchemaType.INTEGER, description: "The index (0-3) of the correct option in the options array." },
-          explanation: { type: SchemaType.STRING, description: "A brief explanation of why the correct option is correct." },
-          difficulty: { type: SchemaType.STRING, description: "The difficulty level: Easy, Medium, or Hard." }
+          questionText: { type: SchemaType.STRING },
+          options: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+          correctOptionIndex: { type: SchemaType.INTEGER },
+          explanation: { type: SchemaType.STRING },
+          difficulty: { type: SchemaType.STRING }
         },
         required: ["questionText", "options", "correctOptionIndex", "explanation", "difficulty"]
       }
@@ -197,29 +168,20 @@ const generateSummary = async (topicName, studyMaterial) => {
 
   const cleanMaterial = (studyMaterial || "").trim().slice(0, 25000);
   const hasMaterial = !!cleanMaterial;
-  const materialContext = hasMaterial
-    ? `CRITICAL MANDATORY INSTRUCTION - STRICT SOURCE GROUNDING:
-Analyze and synthesize the student's uploaded notes below STRICTLY without bringing in outside information:
 
-================ UPLOADED NOTES START ================
+  let prompt;
+  if (hasMaterial) {
+    prompt = `Create a quick pre-quiz summary for "${topicName}" based STRICTLY on these notes:
+
 ${cleanMaterial}
-================ UPLOADED NOTES END ================`
-    : `Using your core domain knowledge for this topic: "${topicName}".\n\n`;
 
-  const prompt = `You are a spaced-repetition study coach. Create a quick, high-yield summary for the topic "${topicName}" so the student can review it right before taking a quiz.
-
-${materialContext}
-
-Structure the summary cleanly with:
-1. **Core Concept Overview** (1-2 clear sentences defining the topic based on the notes)
-2. **Key Mechanisms & Principles** (3-4 concise bullet points extracted directly from the notes)
-3. **Important Formulas, Rules & Definitions** (Key takeaways from the text)
-4. **Common Pitfalls & Exam Traps** (2-3 bullet points)
-
-Keep it concise, clear, and easy to read in 2 minutes.`;
+Structure: 1) Core Overview (1-2 sentences) 2) Key Principles (3-4 bullets) 3) Important Formulas/Definitions 4) Common Pitfalls (2-3 bullets). Keep it under 2 min read.`;
+  } else {
+    prompt = `Create a concise study summary for "${topicName}". Cover: key concepts, important principles, formulas/definitions, and common pitfalls. Keep it under 2 min read.`;
+  }
 
   try {
-    const { result } = await generateWithFallback(prompt, { temperature: 0.7 });
+    const { result } = await generateWithFallback(prompt, { temperature: 0.5 });
     return result.response.text();
   } catch (error) {
     console.error("AI Summary Generation Error:", error);
