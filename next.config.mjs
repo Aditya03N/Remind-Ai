@@ -7,7 +7,7 @@ const nextConfig = {
     const isDev = process.env.NODE_ENV !== "production";
     const defaultBackend = isDev 
       ? "http://localhost:5000" 
-      : "https://remind-ai-production-e632.up.railway.app";
+      : "https://remind-ai-my4n.onrender.com";
     const backendUrl = process.env.BACKEND_URL || defaultBackend;
     return [
       {
